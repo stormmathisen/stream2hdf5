@@ -7,7 +7,7 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc::{sync_channel, Receiver, TrySendError, TryRecvError},
+    mpsc::{sync_channel, Receiver, TrySendError, TryRecvError, RecvTimeoutError},
 };
 use std::time::Duration;
 use std::{thread, time};
@@ -200,13 +200,19 @@ fn read_dma(buffer: &mut File, offset: u64) -> Result<[u16; SAMPLES]> {
 
 fn write_thread (receiver: Receiver<DataContainer>) {
     let mut write_start = time::Instant::now();
-    while let Ok(received_data) = receiver.recv() {
+    
+    loop{
+        match receiver.recv_timeout(time::Duration::from_millis(2)) {
+            Ok(data) => {}
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => {break;}
+        }
 
         println!("Fin, took {} us", write_start.elapsed().as_micros());
-        write_start = time::Instant::now();
+        write_start = time::Instant::now();        
     }
 
-    }
+}
 
 /*
 fn write_hdf() {
