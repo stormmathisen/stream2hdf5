@@ -1,4 +1,4 @@
-use filedescriptor::*;
+//use filedescriptor::*;
 
 
 use std::fs::File;
@@ -12,7 +12,7 @@ use std::sync::{
 use std::time::Duration;
 use std::{thread, time};
 use std::io::SeekFrom;
-use std::ptr::write;
+
 
 use anyhow::{Context, Result};
 use chrono::prelude::*;
@@ -93,8 +93,8 @@ fn main() -> Result<()> {
     let mut dma_file = File::open(DMA_NAME)?;
     let mut bar_file = File::open(BAR1_NAME)
         .with_context(|| format!("Failed to open {}", DMA_NAME))?;
-    let mut bar_fd = FileDescriptor::dup(&bar_file)?;
-    /*let mut poll_array = [
+    /*let mut bar_fd = FileDescriptor::dup(&bar_file)?;
+    let mut poll_array = [
         pollfd {
             fd: bar_fd.into_raw_file_descriptor(),
             events: POLLIN,
@@ -170,14 +170,15 @@ fn main() -> Result<()> {
     match heartbeatsender.try_send(true) {
         Ok(()) => {
             println!("Shutting down heartbeat thread");
-            heartbeat_handle.join().unwrap();
+            heartbeat_handle.join().expect("Heartbeat thread is already dead");
         }
         Err(TrySendError::Full(_)) => {
             println!("Shutting down heartbeat thread");
-            heartbeat_handle.join().unwrap();
+            heartbeat_handle.join().expect("Heartbeat thread is already dead");
         }
         Err(TrySendError::Disconnected(_)) => {}
     }
+    write_handle.join().expect("Write thread is already dead");
     //Join write thread to wait for shutdown
     println!("SHUTDOWN");
     Ok(())
@@ -200,7 +201,7 @@ fn read_dma(buffer: &mut File, offset: u64) -> Result<[u16; SAMPLES]> {
 
 fn write_thread (receiver: Receiver<DataContainer>) {
     let mut write_start = time::Instant::now();
-    
+
     loop{
         match receiver.recv_timeout(time::Duration::from_millis(2)) {
             Ok(data) => {}
@@ -247,7 +248,7 @@ fn false_heartbeat(pulse_rate: Duration, ctrl: Receiver<bool>) -> Result<()>{
         println!{"Finished a heartbeat!"}
 
         match ctrl.try_recv() {
-            Ok(control) => {
+            Ok(_) => {
                 //Main thread has commanded shutdown
                 break;
             }
