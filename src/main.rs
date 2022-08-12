@@ -12,6 +12,7 @@ use std::sync::{
 use std::time::Duration;
 use std::{thread, time};
 use std::io::SeekFrom;
+use std::ptr::write;
 
 use anyhow::{Context, Result};
 use chrono::prelude::*;
@@ -104,12 +105,16 @@ fn main() -> Result<()> {
 
 
     //Spawn fake heartbeat thread
-    let heartbeat_thread = thread::spawn(move || {
+    let heartbeat_handle = thread::spawn(move || {
         false_heartbeat(HEARTBEAT_SLEEP_DURATION, heartbeatreceiver).unwrap();
     }
     );
 
     //Spawn write thread
+    let write_handle = thread::spawn(move ||{
+        write_thread(datareceiver);
+    }
+    );
 
     //Main loop
     while !DONE.load(Ordering::Relaxed) {
@@ -137,18 +142,42 @@ fn main() -> Result<()> {
             cav_probe_pha: read_dma(&mut dma_file, ADC_OFFSET + 9 * ADC_LENGTH).context("Failed to read kly_fwd_pwr")?
         };
 
+        let total_pulse = data_container.total_pulse;
+
         //Try sending data to channel
 
-
-        while read_bar(&mut bar_file, TOTAL_PULSE_OFFSET).context("Failed to read Total Pulse")? == data_container.total_pulse {
+        match datasender.try_send(data_container) {
+            Ok(()) => {} // cool
+            Err(TrySendError::Full(_)) => {
+                println!("DANGER WILL ROBINSON - writer not keeping up!")
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                // The receiving side hung up!
+                // Bounce out of the loop to see what error it had.
+                break;
+            }
+        }
+        //Wait for next pulse (there must be a better way!)
+        while read_bar(&mut bar_file, TOTAL_PULSE_OFFSET).context("Failed to read Total Pulse")? == total_pulse {
             std::hint::spin_loop();
         }
 
-        println!{"Pulse number: {}. Time around the loop: {} us", data_container.total_pulse, shot_start.elapsed().as_micros()};
+        println!{"Pulse number: {}. Time around the loop: {} us", total_pulse, shot_start.elapsed().as_micros()};
 
     }
 
     //Handle closing
+    match heartbeatsender.try_send(true) {
+        Ok(()) => {
+            println!("Shutting down heartbeat thread");
+            heartbeat_handle.join().unwrap();
+        }
+        Err(TrySendError::Full(_)) => {
+            println!("Shutting down heartbeat thread");
+            heartbeat_handle.join().unwrap();
+        }
+        Err(TrySendError::Disconnected(_)) => {}
+    }
     //Join write thread to wait for shutdown
     println!("SHUTDOWN");
     Ok(())
@@ -168,12 +197,18 @@ fn read_dma(buffer: &mut File, offset: u64) -> Result<[u16; SAMPLES]> {
     Ok(output)
 }
 
+
+fn write_thread (receiver: Receiver<DataContainer>) {
+    let mut write_start = time::Instant::now();
+    while let Ok(received_data) = receiver.recv() {
+
+        println!("Fin, took {} us", write_start.elapsed().as_micros());
+        write_start = time::Instant::now();
+    }
+
+    }
+
 /*
-fn write_thread () {
-
-}
-
-
 fn write_hdf() {
 
 }
