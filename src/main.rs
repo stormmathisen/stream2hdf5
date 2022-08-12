@@ -91,7 +91,7 @@ fn main() -> Result<()> {
     let (heartbeatsender, heartbeatreceiver) = sync_channel::<bool>(1);
 
     let mut dma_file = File::open(DMA_NAME)?;
-    let mut bar_file = File::open(DMA_NAME)
+    let mut bar_file = File::open(BAR1_NAME)
         .with_context(|| format!("Failed to open {}", DMA_NAME))?;
     let mut bar_fd = FileDescriptor::dup(&bar_file)?;
     /*let mut poll_array = [
@@ -227,12 +227,12 @@ fn false_heartbeat(pulse_rate: Duration, ctrl: Receiver<bool>) -> Result<()>{
 
     let mut pfile = OpenOptions::new()
         .write(true)
-        .open(DMA_NAME).with_context(|| format!("Fake heartbeat could not open {} in write mode", DMA_NAME))?;
+        .open(BAR1_NAME).with_context(|| format!("Fake heartbeat could not open {} in write mode", BAR1_NAME))?;
 
     loop {
         let end_at = time::Instant::now() + pulse_rate;
         pfile.seek(SeekFrom::Start(TOTAL_PULSE_OFFSET)).context("Error while seeking in fake heartbeat")?;
-        pfile.write_u64::<LittleEndian>(pulse_counter).with_context(|| format!("Failed to write {} to {}", pulse_counter, DMA_NAME))?;
+        pfile.write_u64::<LittleEndian>(pulse_counter).with_context(|| format!("Failed to write {} to {}", pulse_counter, BAR1_NAME))?;
         pulse_counter = pulse_counter.wrapping_add(1);
 
         while time::Instant::now() < end_at {
