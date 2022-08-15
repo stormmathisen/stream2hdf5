@@ -224,11 +224,19 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
         .context("Failed to open binfile")?;
 
     loop{
-        match receiver.recv_timeout(time::Duration::from_millis(2)) {
-            Ok(data) => {write_binary(&mut bin_write, data)
-                .context("Failed to write binary file")?;}
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => {break;}
+        match receiver.recv_timeout(time::Duration::from_micros(2550)) {
+            Ok(data) => {
+                //Received data, write it to file
+                write_binary(&mut bin_write, data)
+                    .context("Failed to write binary file")?;
+                }
+            Err(RecvTimeoutError::Timeout) => {
+                //Took longer than 2550 us to receive data. Restart the loop, but don't worry about it
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                //Main thread has disconnected, probably indicates that we should stop writing and return
+                break;
+            }
         }
 
         println!("Fin, took {} us", write_start.elapsed().as_micros());
