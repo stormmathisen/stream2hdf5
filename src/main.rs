@@ -225,7 +225,8 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
 
     loop{
         match receiver.recv_timeout(time::Duration::from_millis(2)) {
-            Ok(data) => {write_binary(&mut bin_write, data).context("Failed to write binary file")?;}
+            Ok(data) => {write_binary(&mut bin_write, data)
+                .context("Failed to write binary file")?;}
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => {break;}
         }
