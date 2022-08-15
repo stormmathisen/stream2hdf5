@@ -36,6 +36,19 @@ const ADC_NUM: u64= 10; //Number of ADCs
 const ACTIVE_PULSE_OFFSET: u64 = 70; //Offset for active pulse registry
 const TOTAL_PULSE_OFFSET: u64 = 71; //Offset for total pulse registry
 const STATE_OFFSET: u64 = 66; //Offset for stat
+const DATA_FIELD_NAMES: [&str; ADC_NUM as usize] = [
+    "kly_fwd_pwr",
+    "kly_fwd_pha",
+    "kly_rev_pwr",
+    "kly_rev_pha",
+    "cav_fwd_pwr",
+    "cav_fwd_pha",
+    "cav_rev_pwr",
+    "cav_rev_pha",
+    "cav_probe_pwr",
+    "cav_probe_pha"
+];
+
 
 
 #[derive(Debug)]
@@ -158,11 +171,13 @@ fn main() -> Result<()> {
             }
         }
         //Wait for next pulse (there must be a better way!)
-        while read_bar(&mut bar_file, TOTAL_PULSE_OFFSET).context("Failed to read Total Pulse")? == total_pulse {
-            std::hint::spin_loop();
+        while read_bar(&mut bar_file, TOTAL_PULSE_OFFSET)
+            .context("Failed to read Total Pulse")? == total_pulse {
+                std::hint::spin_loop();
         }
 
-        println!{"Pulse number: {}. Time around the loop: {} us", total_pulse, shot_start.elapsed().as_micros()};
+        println!{"Pulse number: {}. Time around the loop: {} us",
+            total_pulse, shot_start.elapsed().as_micros()};
 
     }
 
@@ -170,11 +185,13 @@ fn main() -> Result<()> {
     match heartbeatsender.try_send(true) {
         Ok(()) => {
             println!("Shutting down heartbeat thread");
-            heartbeat_handle.join().expect("Heartbeat thread is already dead");
+            heartbeat_handle.join()
+                .expect("Heartbeat thread is already dead");
         }
         Err(TrySendError::Full(_)) => {
             println!("Shutting down heartbeat thread");
-            heartbeat_handle.join().expect("Heartbeat thread is already dead");
+            heartbeat_handle.join()
+                .expect("Heartbeat thread is already dead");
         }
         Err(TrySendError::Disconnected(_)) => {}
     }
@@ -193,26 +210,56 @@ fn read_bar(buffer: &mut File, offset: u64) ->Result<u64> {
 
 fn read_dma(buffer: &mut File, offset: u64) -> Result<[u16; SAMPLES]> {
     let mut output: [u16; SAMPLES] = [0; SAMPLES];
-    buffer.seek(SeekFrom::Start(offset)).with_context(|| format!("Error while seeking to {} in {:?}", offset, buffer))?;
-    buffer.read_u16_into::<LittleEndian>(&mut output).with_context(|| format!("Error while reading {:?} into {:?}", buffer, output))?;
+    buffer.seek(SeekFrom::Start(offset))
+        .with_context(|| format!("Error while seeking to {} in {:?}", offset, buffer))?;
+    buffer.read_u16_into::<LittleEndian>(&mut output)
+        .with_context(|| format!("Error while reading {:?} into {:?}", buffer, output))?;
     Ok(output)
 }
 
 
-fn write_thread (receiver: Receiver<DataContainer>) {
+fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     let mut write_start = time::Instant::now();
+    let mut bin_write = File::create(TMP_LOC.to_owned() + "binfile")
+        .context("Failed to open binfile")?;
 
     loop{
         match receiver.recv_timeout(time::Duration::from_millis(2)) {
-            Ok(data) => {}
+            Ok(data) => {write_binary(&mut bin_write, data).context("Failed to write binary file")?;}
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => {break;}
         }
 
         println!("Fin, took {} us", write_start.elapsed().as_micros());
-        write_start = time::Instant::now();        
+        write_start = time::Instant::now();
     }
+    Ok(())
+}
 
+fn write_binary(buffer: &mut File, data: DataContainer) -> Result<()> {
+    buffer.write_u64::<LittleEndian>(data.internal_count)
+        .with_context(|| format!("Failed to write internal count ({})", data.internal_count))?;
+
+    buffer.write_u64::<LittleEndian>(data.datetime.timestamp_nanos() as u64)
+        .with_context(|| format!("Failed to write timestamp ({})", data.datetime.timestamp_nanos() as u64))?;
+    
+    buffer.write_u64::<LittleEndian>(data.active_pulse)
+        .with_context(|| format!("Failed to write active pulse ({})", data.active_pulse))?;
+
+    buffer.write_u64::<LittleEndian>(data.total_pulse)
+        .with_context(|| format!("Failed to write total pulse ({})", data.total_pulse))?;
+
+    buffer.write_u64::<LittleEndian>(data.state as u64)
+        .with_context(|| format!("Failed to write state ({})", data.state as u64))?;
+    let mut i = 0;
+    for array in data.into_iter() {
+        for ii in 0..SAMPLES {
+            buffer.write_u16::<LittleEndian>(array[ii])
+                .with_context(|| format!("Failed to write sample {} of {}", ii, DATA_FIELD_NAMES[i]))?;
+        }
+        i += 1;
+    }
+    Ok(())
 }
 
 /*
@@ -225,6 +272,10 @@ fn write_hdf_attr() {
 }
 
 fn write_hdf_ds() {
+
+}
+
+fn switch_hdf() {
 
 }
 */
