@@ -178,6 +178,7 @@ fn main() -> Result<()> {
 
         println!{"Pulse number: {}. Time around the loop: {} us",
             total_pulse, shot_start.elapsed().as_micros()};
+        main_loop_counter += 1;
 
     }
 
