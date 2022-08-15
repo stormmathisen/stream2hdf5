@@ -125,7 +125,7 @@ fn main() -> Result<()> {
 
     //Spawn write thread
     let write_handle = thread::spawn(move ||{
-        write_thread(datareceiver);
+        write_thread(datareceiver).context("Write thread error");
     }
     );
 
@@ -182,6 +182,8 @@ fn main() -> Result<()> {
     }
 
     //Handle closing
+    drop(datasender);
+    //Dropping the datasender should hangup
     match heartbeatsender.try_send(true) {
         Ok(()) => {
             println!("Shutting down heartbeat thread");
@@ -193,7 +195,9 @@ fn main() -> Result<()> {
             heartbeat_handle.join()
                 .expect("Heartbeat thread is already dead");
         }
-        Err(TrySendError::Disconnected(_)) => {}
+        Err(TrySendError::Disconnected(_)) => {
+            //Heartbeat thread is already dead, no need to do anything
+        }
     }
     write_handle.join().expect("Write thread is already dead");
     //Join write thread to wait for shutdown
