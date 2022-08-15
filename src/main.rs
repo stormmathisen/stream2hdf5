@@ -143,16 +143,16 @@ fn main() -> Result<()> {
             active_pulse: read_bar(&mut bar_file, ACTIVE_PULSE_OFFSET).context("Failed to read Active Pulse")?,
             total_pulse: read_bar(&mut bar_file, TOTAL_PULSE_OFFSET).context("Failed to read Total Pulse")?,
             state: read_bar(&mut bar_file, STATE_OFFSET).context("Failed to read State")? as u32,
-            kly_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 0 * ADC_LENGTH).context("Failed to read kly_fwd_pwr")?,
-            kly_fwd_pha: read_dma(&mut dma_file, ADC_OFFSET + 1 * ADC_LENGTH).context("Failed to read kly_fwd_pwr")?,
-            kly_rev_pwr: read_dma(&mut dma_file, ADC_OFFSET + 2 * ADC_LENGTH).context("Failed to read kly_fwd_pwr")?,
-            kly_rev_pha: read_dma(&mut dma_file, ADC_OFFSET + 3 * ADC_LENGTH).context("Failed to read kly_fwd_pwr")?,
-            cav_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 4 * ADC_LENGTH).context("Failed to read kly_fwd_pwr")?,
-            cav_fwd_pha: read_dma(&mut dma_file, ADC_OFFSET + 5 * ADC_LENGTH).context("Failed to read kly_fwd_pwr")?,
-            cav_rev_pwr: read_dma(&mut dma_file, ADC_OFFSET + 6 * ADC_LENGTH).context("Failed to read kly_fwd_pwr")?,
-            cav_rev_pha: read_dma(&mut dma_file, ADC_OFFSET + 7 * ADC_LENGTH).context("Failed to read kly_fwd_pwr")?,
-            cav_probe_pwr: read_dma(&mut dma_file, ADC_OFFSET + 8 * ADC_LENGTH).context("Failed to read kly_fwd_pwr")?,
-            cav_probe_pha: read_dma(&mut dma_file, ADC_OFFSET + 9 * ADC_LENGTH).context("Failed to read kly_fwd_pwr")?
+            kly_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 0 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[0]))?,
+            kly_fwd_pha: read_dma(&mut dma_file, ADC_OFFSET + 1 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[1]))?,
+            kly_rev_pwr: read_dma(&mut dma_file, ADC_OFFSET + 2 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[2]))?,
+            kly_rev_pha: read_dma(&mut dma_file, ADC_OFFSET + 3 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[3]))?,
+            cav_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 4 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[4]))?,
+            cav_fwd_pha: read_dma(&mut dma_file, ADC_OFFSET + 5 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[5]))?,
+            cav_rev_pwr: read_dma(&mut dma_file, ADC_OFFSET + 6 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[6]))?,
+            cav_rev_pha: read_dma(&mut dma_file, ADC_OFFSET + 7 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[7]))?,
+            cav_probe_pwr: read_dma(&mut dma_file, ADC_OFFSET + 8 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[8]))?,
+            cav_probe_pha: read_dma(&mut dma_file, ADC_OFFSET + 9 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[9]))?
         };
 
         let total_pulse = data_container.total_pulse;
