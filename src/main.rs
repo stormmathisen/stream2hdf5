@@ -51,6 +51,9 @@ const DATA_FIELD_NAMES: [&str; ADC_NUM as usize] = [
     "cav_probe_pha"
 ];
 
+//HDF5 definitions
+const CHUNK_SIZE: usize = 256; //HDF5 chunk size
+
 
 
 #[derive(Debug)]
@@ -299,8 +302,17 @@ fn write_hdf_attr(hdfgroup: &hdf5::Group, name: &str, data: u64) -> Result<()> {
     Ok(())
 }
 
-fn write_hdf_ds() {
+fn write_hdf_ds(hdfgroup: &hdf5::Group, name: &str, data: &[u16; SAMPLES]) -> Result<()> {
+    let builder = hdfgroup
+        .new_dataset_builder()
+        .chunk(CHUNK_SIZE);
 
+    builder
+        .with_data(data)
+        .create(name)
+        .with_context(|| format!("Failed to write dataset {}", name))?;
+
+    Ok(())
 }
 
 fn switch_hdf() {
