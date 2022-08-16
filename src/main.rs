@@ -286,8 +286,29 @@ fn write_binary(buffer: &mut File, data: DataContainer) -> Result<()> {
 }
 
 
-fn write_hdf() {
+fn write_hdf(hdffile: &hdf5::File, data: DataContainer) -> Result<()> {
+    let timestamp = &data.datetime.format("%Y-%m-%d %H:%M:%S.%f").to_string();
+    let hdfgroup = hdffile
+        .create_group(timestamp)
+        .with_context(|| format!("Failed to create group at {}", timestamp))?;
 
+    //Write attributes
+    write_hdf_attr(&hdfgroup, "internal_count", data.internal_count)
+        .context("Failed to call write_hdf_attr for internal_count")?;
+
+    write_hdf_attr(&hdfgroup, "datetime", data.datetime.timestamp_nanos() as u64)
+        .context("Failed to call write_hdf_attr for datetime")?;
+
+    write_hdf_attr(&hdfgroup, "active_pulse", data.active_pulse)
+        .context("Failed to call write_hdf_attr for active_pulse")?;
+
+    write_hdf_attr(&hdfgroup, "total_pulse", data.total_pulse)
+        .context("Failed to call write_hdf_attr for total_pulse")?;
+
+    write_hdf_attr(&hdfgroup, "state", data.state as u64)
+        .context("Failed to call write_hdf_attr for state")?;
+
+    Ok(())
 }
 
 fn write_hdf_attr(hdfgroup: &hdf5::Group, name: &str, data: u64) -> Result<()> {
