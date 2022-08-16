@@ -100,7 +100,7 @@ fn main() -> Result<()> {
     //Initalize counters, files and channels
     let mut main_loop_counter: u64 = 0;
 
-    let (datasender, datareceiver) = sync_channel::<DataContainer>(4);
+    let (datasender, datareceiver) = sync_channel::<DataContainer>(8);
     let (heartbeatsender, heartbeatreceiver) = sync_channel::<bool>(1);
 
     let mut dma_file = File::open(DMA_NAME)?;
@@ -271,7 +271,7 @@ fn write_binary(buffer: &mut File, data: DataContainer) -> Result<()> {
         .with_context(|| format!("Failed to write state ({})", data.state as u64))?;
     let mut i = 0;
     for array in data.into_iter() {
-        for ii in 0..SAMPLES {
+        for ii in 0..128 {
             buffer.write_u16::<LittleEndian>(array[ii])
                 .with_context(|| format!("Failed to write sample {} of {}", ii, DATA_FIELD_NAMES[i]))?;
         }
