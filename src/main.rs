@@ -175,9 +175,10 @@ fn main() -> Result<()> {
             .context("Failed to read Total Pulse")? == total_pulse {
                 std::hint::spin_loop();
         }
-
-        println!{"Pulse number: {}. Time around the loop: {} us",
-            total_pulse, shot_start.elapsed().as_micros()};
+        if main_loop_counter % 400 == 0 {
+            println! {"Pulse number: {}. Time around the loop: {} us",
+                      total_pulse, shot_start.elapsed().as_micros()};
+        }
         main_loop_counter += 1;
 
     }
@@ -224,6 +225,7 @@ fn read_dma(buffer: &mut File, offset: u64) -> Result<[u16; SAMPLES]> {
 
 
 fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
+    let mut write_count = 0;
     let mut write_start = time::Instant::now();
     let mut bin_write = File::create(TMP_LOC.to_owned() + "binfile")
         .context("Failed to open binfile")?;
@@ -232,8 +234,8 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
         match receiver.recv_timeout(time::Duration::from_micros(2550)) {
             Ok(data) => {
                 //Received data, write it to file
-                write_binary(&mut bin_write, data)
-                    .context("Failed to write binary file")?;
+                /*write_binary(&mut bin_write, data)
+                    .context("Failed to write binary file")?;*/
                 }
             Err(RecvTimeoutError::Timeout) => {
                 //Took longer than 2550 us to receive data. Restart the loop, but don't worry about it
@@ -243,8 +245,10 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
                 break;
             }
         }
-
-        println!("Fin, took {} us", write_start.elapsed().as_micros());
+        if write_count % 400 == 0 {
+            println!("Fin, took {} us", write_start.elapsed().as_micros());
+        }
+        write_count += 1;
         write_start = time::Instant::now();
     }
     Ok(())
@@ -310,7 +314,9 @@ fn false_heartbeat(pulse_rate: Duration, ctrl: Receiver<bool>) -> Result<()>{
         while time::Instant::now() < end_at {
             std::hint::spin_loop();
         }
-        println!{"Finished a heartbeat!"}
+        if pulse_counter % 400 == 0 {
+            println! {"Finished a heartbeat!"};
+        }
 
         match ctrl.try_recv() {
             Ok(_) => {
