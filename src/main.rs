@@ -101,11 +101,12 @@ impl IntoIterator for DataContainer {
 fn main() -> Result<()> {
     //Handle ctrl+c by telling threads to finish
     ctrlc::set_handler(|| DONE.store(true, Ordering::SeqCst))?;
+    println!("hdf5 threadsafe = {}", hdf5::is_library_threadsafe());
 
     //Initalize counters, files and channels
     let mut main_loop_counter: u64 = 0;
 
-    let (datasender, datareceiver) = sync_channel::<DataContainer>(8);
+    let (datasender, datareceiver) = sync_channel::<DataContainer>(100);
     let (heartbeatsender, heartbeatreceiver) = sync_channel::<bool>(1);
 
     let mut dma_file = File::open(DMA_NAME)?;
@@ -167,7 +168,8 @@ fn main() -> Result<()> {
         match datasender.try_send(data_container) {
             Ok(()) => {} // cool
             Err(TrySendError::Full(_)) => {
-                println!("DANGER WILL ROBINSON - writer not keeping up!")
+                println!("DANGER WILL ROBINSON - writer not keeping up!");
+                break;
             }
             Err(TrySendError::Disconnected(_)) => {
                 // The receiving side hung up!
@@ -208,7 +210,7 @@ fn main() -> Result<()> {
     }
     write_handle.join().expect("Write thread is already dead");
     //Join write thread to wait for shutdown
-    println!("SHUTDOWN");
+    println!("SHUTDOWN: {}", main_loop_counter);
     Ok(())
 }
 
@@ -231,31 +233,74 @@ fn read_dma(buffer: &mut File, offset: u64) -> Result<[u16; SAMPLES]> {
 
 fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     let mut write_count = 0;
+    let mut rolling_avg:Vec<i64> = Vec::new();
+    let mut write_time:i64 = 0;
     let mut write_start = time::Instant::now();
-    let mut bin_write = File::create(TMP_LOC.to_owned() + "binfile")
-        .context("Failed to open binfile")?;
+    let mut next_midnight = Utc::now()
+        .date()
+        .succ()
+        .and_hms(0,0,0);
+
+    let mut hdffname = TMP_LOC.to_owned() + &chrono::Utc::now()
+        .format("%Y-%m-%d %H:%M:%S.%f.h5")
+        .to_string();
+    hdf5::File::create(&hdffname)
+        .context("Failed to open hdffile")?;
+
+    //let mut bin_write = File::create(TMP_LOC.to_owned() + "binfile")
+    //    .context("Failed to open binfile")?;
+
 
     loop{
         match receiver.recv_timeout(time::Duration::from_micros(2550)) {
             Ok(data) => {
                 //Received data, write it to file
-                write_binary(&mut bin_write, data)
+                let total_pulse = data.total_pulse;
+
+                write_hdf(&hdffname, data)
                     .context("Failed to write binary file")?;
+
+                write_time = write_start.elapsed().as_micros() as i64;
+
+                rolling_avg.push(write_time);
+
+                if write_count % 400 == 0 {
+                    println!("Fin, took {} us to write pulse {}", write_time, total_pulse);
+                    let sum: i64 = rolling_avg.iter().sum();
+                    let len: i64 = rolling_avg.len() as i64;
+                    println!("Rolling avg is {} us", sum/len);
+                    rolling_avg.clear();
                 }
+                write_count += 1;
+                write_start = time::Instant::now();
+            }
             Err(RecvTimeoutError::Timeout) => {
-                //Took longer than 2550 us to receive data. Restart the loop, but don't worry about it
+                //Took longer than 1000 us to receive data. Restart the loop, but don't worry about it
+                if write_count % 400 == 0 {
+                    println!("Receive timeout");
+                }
             }
             Err(RecvTimeoutError::Disconnected) => {
                 //Main thread has disconnected, probably indicates that we should stop writing and return
                 break;
             }
         }
-        if write_count % 400 == 0 {
-            println!("Fin, took {} us", write_start.elapsed().as_micros());
+        if Utc::now() > next_midnight {
+            //Switch to next hdf5file
+            hdffname = TMP_LOC.to_owned() + &chrono::Utc::now()
+                .format("%Y-%m-%d %H:%M:%S.%f.h5")
+                .to_string();
+            hdf5::File::create(&hdffname)
+                .context("Failed to open hdffile")?;
+            next_midnight = Utc::now()
+                .date()
+                .succ()
+                .and_hms(0,0,0);
+
         }
-        write_count += 1;
-        write_start = time::Instant::now();
     }
+    println!("Write thread: {}", write_count);
+    println!("Rolling avg is {:?} us", rolling_avg);
     Ok(())
 }
 
@@ -286,7 +331,9 @@ fn write_binary(buffer: &mut File, data: DataContainer) -> Result<()> {
 }
 
 
-fn write_hdf(hdffile: &hdf5::File, data: DataContainer) -> Result<()> {
+fn write_hdf(hdffname: &str, data: DataContainer) -> Result<()> {
+    let mut hdffile = hdf5::File::open_rw(&hdffname, )
+        .context("Failed to open hdffile")?;
     let timestamp = &data.datetime.format("%Y-%m-%d %H:%M:%S.%f").to_string();
     let hdfgroup = hdffile
         .create_group(timestamp)
@@ -307,7 +354,16 @@ fn write_hdf(hdffile: &hdf5::File, data: DataContainer) -> Result<()> {
 
     write_hdf_attr(&hdfgroup, "state", data.state as u64)
         .context("Failed to call write_hdf_attr for state")?;
-
+    let mut i = 0;
+    for array in data.into_iter() {
+        write_hdf_ds(&hdfgroup, DATA_FIELD_NAMES[i], &array)
+            .with_context(|| format!("Failed to call write_hdf_arr for {}", DATA_FIELD_NAMES[i]))?;
+        i += 1;
+    }
+    hdffile.flush()
+        .context("Failed to flush hdffile")?;
+    hdffile.close()
+        .context("Failed to close hdffile")?;
     Ok(())
 }
 
