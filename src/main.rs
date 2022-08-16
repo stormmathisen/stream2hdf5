@@ -234,8 +234,8 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
         match receiver.recv_timeout(time::Duration::from_micros(2550)) {
             Ok(data) => {
                 //Received data, write it to file
-                /*write_binary(&mut bin_write, data)
-                    .context("Failed to write binary file")?;*/
+                write_binary(&mut bin_write, data)
+                    .context("Failed to write binary file")?;
                 }
             Err(RecvTimeoutError::Timeout) => {
                 //Took longer than 2550 us to receive data. Restart the loop, but don't worry about it
