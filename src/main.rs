@@ -18,6 +18,8 @@ use anyhow::{Context, Result};
 use chrono::prelude::*;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
+use hdf5;
+
 //Timing
 const HEARTBEAT_SLEEP_DURATION: Duration = Duration::from_micros(2500);
 
@@ -280,13 +282,21 @@ fn write_binary(buffer: &mut File, data: DataContainer) -> Result<()> {
     Ok(())
 }
 
-/*
+
 fn write_hdf() {
 
 }
 
-fn write_hdf_attr() {
-
+fn write_hdf_attr(hdfgroup: &hdf5::Group, name: &str, data: u64) -> Result<()> {
+    let attr = hdfgroup
+        .new_attr::<u64>()
+        .shape([1])
+        .create(name)
+        .with_context(|| format!("Unable to create attr {}", name))?;
+    attr
+        .write(&[data])
+        .with_context(|| format!("Unable to write {} to attr {}", data, name))?;
+    Ok(())
 }
 
 fn write_hdf_ds() {
@@ -296,7 +306,7 @@ fn write_hdf_ds() {
 fn switch_hdf() {
 
 }
-*/
+
 
 fn false_heartbeat(pulse_rate: Duration, ctrl: Receiver<bool>) -> Result<()>{
     let mut pulse_counter: u64 = 0;
