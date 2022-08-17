@@ -12,8 +12,6 @@ use std::sync::{
 use std::time::Duration;
 use std::{thread, time};
 use std::io::SeekFrom;
-use std::ops::Add;
-
 
 use anyhow::{Context, Result};
 use chrono::prelude::*;
@@ -239,7 +237,6 @@ fn read_dma(buffer: &mut File, offset: u64) -> Result<[u16; SAMPLES]> {
 fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     let mut write_count = 0;
     let mut rolling_avg:Vec<i64> = Vec::new();
-    let mut write_time:i64 = 0;
     let mut write_start = time::Instant::now();
     let mut next_switch = write_start + SWITCH_INTERVAL;
     let mut hdffname = TMP_LOC.to_owned() + &chrono::Utc::now()
@@ -265,9 +262,7 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
                     .context("Failed to write binary file")?;
                 //thread::sleep(time::Duration::from_micros(1500));
 
-                write_time = write_start.elapsed().as_micros() as i64;
-
-                rolling_avg.push(write_time);
+                rolling_avg.push(write_start.elapsed().as_micros() as i64);
 
                 if write_count % 400 == 0 {
                     let sum: i64 = rolling_avg.iter().sum();
@@ -313,6 +308,14 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
 
         }
     }
+    hdffile.close()
+        .context("Failed to close hdffile")?;
+    let move_thread = thread::spawn(move || {
+        std::fs::copy(&hdffname, NAS_LOC.to_owned() + &hdffname);
+        println!("Finished copying file!");
+        std::fs::remove_file(&hdffname);
+    });
+    move_thread.join().expect("Sorry, can't copy the last file");
     println!("Write thread: {}", write_count);
     println!("Rolling avg is {:?} us", rolling_avg);
     Ok(())
@@ -350,7 +353,7 @@ fn write_hdf(hdffile: &hdf5::File, data: DataContainer, counter: &u64) -> Result
     let timestamp = &data.datetime.format("%Y-%m-%d %H:%M:%S.%f").to_string();
     let hdf_time_timestamp = &hdf_time.elapsed().as_micros();
     let hdf_time_open = &hdf_time.elapsed().as_micros()-hdf_time_timestamp;
-    let mut hdfgroup = hdffile
+    let hdfgroup = hdffile
         .create_group(timestamp)
         .with_context(|| format!("Failed to create group at {}", timestamp))?;
     let hdf_time_group = &hdf_time.elapsed().as_micros()-hdf_time_open;
