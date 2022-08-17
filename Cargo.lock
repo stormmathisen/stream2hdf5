@@ -431,6 +431,7 @@ dependencies = [
  "ctrlc",
  "filedescriptor",
  "hdf5",
+ "hdf5-sys",
  "ndarray",
 ]
 
