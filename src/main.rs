@@ -239,9 +239,11 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     let mut rolling_avg:Vec<i64> = Vec::new();
     let mut write_start = time::Instant::now();
     let mut next_switch = write_start + SWITCH_INTERVAL;
-    let mut hdffname = TMP_LOC.to_owned() + &chrono::Utc::now()
+    let fnamenow = Utc::now()
         .format("%Y-%m-%d %H:%M:%S.%f.h5")
         .to_string();
+    let mut hdffname = TMP_LOC.to_owned() + &fnamenow;
+    let mut hdffname_move = NAS_LOC.to_owned() +&fnamenow;
     hdf5::File::create(&hdffname)
         .context("Failed to open hdffile")?;
     let mut hdffile = hdf5::File::open_rw(&hdffname)
@@ -291,15 +293,22 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
             hdffile.close()
                 .context("Failed to close hdffile")?;
             let old_hdffname = hdffname.to_owned();
+            let old_hdffname_move = hdffname_move.to_owned();
             thread::spawn(move || {
-                std::fs::copy(&old_hdffname, NAS_LOC.to_owned() + &old_hdffname);
-                println!("Finished copying file!");
-                std::fs::remove_file(&old_hdffname);
+                match std::fs::copy(&old_hdffname, &old_hdffname_move){
+                    Ok(_) => {
+                        println!("Finished copying file!");
+                        std::fs::remove_file(&old_hdffname);
+                    }
+                    Err(error) => {println!("{:?}", error)}
+                }
             });
 
-            hdffname = TMP_LOC.to_owned() + &chrono::Utc::now()
+            let fnamenow = Utc::now()
                 .format("%Y-%m-%d %H:%M:%S.%f.h5")
                 .to_string();
+            hdffname = TMP_LOC.to_owned() + &fnamenow;
+            hdffname_move = NAS_LOC.to_owned() +&fnamenow;
             hdf5::File::create(&hdffname)
                 .context("Failed to open hdffile")?;
             hdffile = hdf5::File::open_rw(&hdffname)
@@ -311,10 +320,13 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     hdffile.close()
         .context("Failed to close hdffile")?;
     let move_thread = thread::spawn(move || {
-        std::fs::copy(&hdffname, NAS_LOC.to_owned() + &hdffname);
-        println!("Finished copying file!");
-        std::fs::remove_file(&hdffname);
-    });
+        match std::fs::copy(&hdffname, &hdffname_move){
+            Ok(_) => {
+                println!("Finished copying file!");
+                std::fs::remove_file(&hdffname);
+            }
+            Err(error) => {println!("{:?}", error)}
+        }    });
     move_thread.join().expect("Sorry, can't copy the last file");
     println!("Write thread: {}", write_count);
     println!("Rolling avg is {:?} us", rolling_avg);
