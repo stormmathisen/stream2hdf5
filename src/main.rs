@@ -19,6 +19,7 @@ use chrono::prelude::*;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use hdf5;
+use ndarray::{arr2};
 
 //Timing
 const HEARTBEAT_SLEEP_DURATION: Duration = Duration::from_micros(2500);
@@ -50,6 +51,7 @@ const DATA_FIELD_NAMES: [&str; ADC_NUM as usize] = [
     "cav_probe_pwr",
     "cav_probe_pha"
 ];
+const DATA_BOUND: usize = 16;
 
 //HDF5 definitions
 const CHUNK_SIZE: usize = 256; //HDF5 chunk size
@@ -106,7 +108,7 @@ fn main() -> Result<()> {
     //Initalize counters, files and channels
     let mut main_loop_counter: u64 = 0;
 
-    let (datasender, datareceiver) = sync_channel::<DataContainer>(100);
+    let (datasender, datareceiver) = sync_channel::<DataContainer>(DATA_BOUND);
     let (heartbeatsender, heartbeatreceiver) = sync_channel::<bool>(1);
 
     let mut dma_file = File::open(DMA_NAME)?;
@@ -187,9 +189,7 @@ fn main() -> Result<()> {
                       total_pulse, shot_start.elapsed().as_micros()};
         }
         main_loop_counter += 1;
-
     }
-
     //Handle closing
     drop(datasender);
     //Dropping the datasender should hangup
@@ -244,7 +244,7 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     let mut hdffname = TMP_LOC.to_owned() + &chrono::Utc::now()
         .format("%Y-%m-%d %H:%M:%S.%f.h5")
         .to_string();
-    hdf5::File::create(&hdffname)
+    let mut hdffile = hdf5::File::create(&hdffname)
         .context("Failed to open hdffile")?;
 
     //let mut bin_write = File::create(TMP_LOC.to_owned() + "binfile")
@@ -252,27 +252,31 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
 
 
     loop{
-        match receiver.recv_timeout(time::Duration::from_micros(2550)) {
+        match receiver.recv_timeout(time::Duration::from_micros(3000)) {
             Ok(data) => {
                 //Received data, write it to file
+                write_start = time::Instant::now();
                 let total_pulse = data.total_pulse;
 
-                write_hdf(&hdffname, data)
+                write_hdf(&hdffile, data)
                     .context("Failed to write binary file")?;
+                //thread::sleep(time::Duration::from_micros(1500));
 
                 write_time = write_start.elapsed().as_micros() as i64;
 
                 rolling_avg.push(write_time);
 
                 if write_count % 400 == 0 {
-                    println!("Fin, took {} us to write pulse {}", write_time, total_pulse);
                     let sum: i64 = rolling_avg.iter().sum();
                     let len: i64 = rolling_avg.len() as i64;
-                    println!("Rolling avg is {} us", sum/len);
+                    println!("Wrote {}, rolling avg is {} us", total_pulse, sum/len);
+                    //println!("Rolling avg is {} us", sum/len);
                     rolling_avg.clear();
+                    hdffile.flush()
+                        .context("Failed to flush hdffile")?;
                 }
                 write_count += 1;
-                write_start = time::Instant::now();
+
             }
             Err(RecvTimeoutError::Timeout) => {
                 //Took longer than 1000 us to receive data. Restart the loop, but don't worry about it
@@ -287,10 +291,12 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
         }
         if Utc::now() > next_midnight {
             //Switch to next hdf5file
+            hdffile.close()
+                .context("Failed to close HDF file")?;
             hdffname = TMP_LOC.to_owned() + &chrono::Utc::now()
                 .format("%Y-%m-%d %H:%M:%S.%f.h5")
                 .to_string();
-            hdf5::File::create(&hdffname)
+            hdffile = hdf5::File::create(&hdffname)
                 .context("Failed to open hdffile")?;
             next_midnight = Utc::now()
                 .date()
@@ -299,6 +305,7 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
 
         }
     }
+    drop(hdffile);
     println!("Write thread: {}", write_count);
     println!("Rolling avg is {:?} us", rolling_avg);
     Ok(())
@@ -331,11 +338,9 @@ fn write_binary(buffer: &mut File, data: DataContainer) -> Result<()> {
 }
 
 
-fn write_hdf(hdffname: &str, data: DataContainer) -> Result<()> {
-    let mut hdffile = hdf5::File::open_rw(&hdffname, )
-        .context("Failed to open hdffile")?;
+fn write_hdf(hdffile: &hdf5::File, data: DataContainer) -> Result<()> {
     let timestamp = &data.datetime.format("%Y-%m-%d %H:%M:%S.%f").to_string();
-    let hdfgroup = hdffile
+    let mut hdfgroup = hdffile
         .create_group(timestamp)
         .with_context(|| format!("Failed to create group at {}", timestamp))?;
 
@@ -354,16 +359,31 @@ fn write_hdf(hdffname: &str, data: DataContainer) -> Result<()> {
 
     write_hdf_attr(&hdfgroup, "state", data.state as u64)
         .context("Failed to call write_hdf_attr for state")?;
-    let mut i = 0;
+
+    let ds_data = arr2(&[
+        [data.kly_fwd_pwr],
+        [data.kly_fwd_pha],
+        [data.kly_rev_pwr],
+        [data.kly_rev_pha],
+        [data.cav_fwd_pwr],
+        [data.cav_fwd_pha],
+        [data.cav_rev_pwr],
+        [data.cav_rev_pha],
+        [data.cav_probe_pwr],
+        [data.cav_probe_pha]
+    ]);
+
+    write_hdf_ds(&hdfgroup, "waveforms", &ds_data).unwrap();
+
+    /*let mut i = 0;
     for array in data.into_iter() {
         write_hdf_ds(&hdfgroup, DATA_FIELD_NAMES[i], &array)
             .with_context(|| format!("Failed to call write_hdf_arr for {}", DATA_FIELD_NAMES[i]))?;
         i += 1;
-    }
-    hdffile.flush()
-        .context("Failed to flush hdffile")?;
-    hdffile.close()
-        .context("Failed to close hdffile")?;
+    }*/
+    //drop(hdfgroup);
+    //hdffile.flush()
+    //    .context("Failed to flush hdffile")?;
     Ok(())
 }
 
@@ -376,19 +396,20 @@ fn write_hdf_attr(hdfgroup: &hdf5::Group, name: &str, data: u64) -> Result<()> {
     attr
         .write(&[data])
         .with_context(|| format!("Unable to write {} to attr {}", data, name))?;
+    drop(attr);
     Ok(())
 }
 
-fn write_hdf_ds(hdfgroup: &hdf5::Group, name: &str, data: &[u16; SAMPLES]) -> Result<()> {
+//fn write_hdf_ds(hdfgroup: &hdf5::Group, name: &str, data: &[u16; SAMPLES]) -> Result<()> {
+fn write_hdf_ds(hdfgroup: &hdf5::Group, name: &str, data: &ndarray::Array2<[u16; SAMPLES]>) -> Result<()> {
     let builder = hdfgroup
-        .new_dataset_builder()
-        .chunk(CHUNK_SIZE);
+        .new_dataset_builder();
+        //.chunk(CHUNK_SIZE);
 
     builder
         .with_data(data)
         .create(name)
         .with_context(|| format!("Failed to write dataset {}", name))?;
-
     Ok(())
 }
 
@@ -413,9 +434,9 @@ fn false_heartbeat(pulse_rate: Duration, ctrl: Receiver<bool>) -> Result<()>{
         while time::Instant::now() < end_at {
             std::hint::spin_loop();
         }
-        if pulse_counter % 400 == 0 {
+        /*if pulse_counter % 400 == 0 {
             println! {"Finished a heartbeat!"};
-        }
+        }*/
 
         match ctrl.try_recv() {
             Ok(_) => {
