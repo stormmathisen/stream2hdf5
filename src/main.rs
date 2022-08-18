@@ -23,6 +23,8 @@ use ndarray::{arr2};
 //Timing
 const HEARTBEAT_SLEEP_DURATION: Duration = Duration::from_micros(2500);
 const SWITCH_INTERVAL: Duration = Duration::from_secs(3600);
+const PRINT_INTERVAL: u64 = 10000;
+const CLOSE_INTERVAL: Duration = Duration::from_secs(900);
 
 //File definitions
 const BAR1_NAME: &str = "/home/storm/Desktop/hdf5rustlocal/pcie_bar1_s5";
@@ -51,7 +53,7 @@ const DATA_FIELD_NAMES: [&str; ADC_NUM as usize] = [
     "cav_probe_pwr",
     "cav_probe_pha"
 ];
-const DATA_BOUND: usize = 128;
+const DATA_BOUND: usize = 1024;
 
 //HDF5 definitions
 const CHUNK_SIZE: usize = 16; //HDF5 chunk size
@@ -185,7 +187,7 @@ fn main() -> Result<()> {
             .context("Failed to read Total Pulse")? == total_pulse {
                 std::hint::spin_loop();
         }
-        if main_loop_counter % 400 == 0 {
+        if main_loop_counter % PRINT_INTERVAL == 0 {
             println! {"Pulse number: {}. Time around the loop: {} us",
                       total_pulse, shot_start.elapsed().as_micros()};
         }
@@ -239,6 +241,7 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     let mut rolling_avg:Vec<i64> = Vec::new();
     let mut write_start = time::Instant::now();
     let mut next_switch = write_start + SWITCH_INTERVAL;
+    let mut next_close = write_start + CLOSE_INTERVAL;
     let fnamenow = Utc::now()
         .format("%Y-%m-%d %H:%M:%S.%f.h5")
         .to_string();
@@ -259,6 +262,12 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
                 //Received data, write it to file
                 write_start = time::Instant::now();
                 let total_pulse = data.total_pulse;
+                if time::Instant::now() > next_close{
+                    hdffile.close()
+                        .context("Failed to close HDF file after 15 mins")?;
+                    hdffile = hdf5::File::open_rw(&hdffname)
+                        .context("Failed to open hdffile")?;
+                }
 
                 write_hdf(&hdffile, data, &total_pulse)
                     .context("Failed to write binary file")?;
@@ -266,7 +275,7 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
 
                 rolling_avg.push(write_start.elapsed().as_micros() as i64);
 
-                if write_count % 400 == 0 {
+                if write_count % PRINT_INTERVAL == 0 {
                     let sum: i64 = rolling_avg.iter().sum();
                     let len: i64 = rolling_avg.len() as i64;
                     println!("Wrote {}, rolling avg is {} us", total_pulse, sum/len);
@@ -278,7 +287,7 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
             }
             Err(RecvTimeoutError::Timeout) => {
                 //Took longer than 1000 us to receive data. Restart the loop, but don't worry about it
-                if write_count % 400 == 0 {
+                if write_count % PRINT_INTERVAL == 0 {
                     println!("Receive timeout");
                 }
             }
@@ -411,7 +420,7 @@ fn write_hdf(hdffile: &hdf5::File, data: DataContainer, counter: &u64) -> Result
     //drop(hdffile);
     unsafe {hdf5_sys::h5::H5garbage_collect();}
     let hdf_time_drop = &hdf_time.elapsed().as_micros()-hdf_time_flush;
-    if counter % 400 == 0 {
+    if counter % PRINT_INTERVAL == 0 {
         println!("Timestamp: {}\nOpen: {}\nGroup: {}\nAttr: {}\nDS: {}\nFlush: {}\nDrop: {}",
             hdf_time_timestamp,
             hdf_time_open,
