@@ -11,20 +11,22 @@ use std::sync::{
 };
 use std::time::Duration;
 use std::{thread, time};
+use std::any::Any;
 use std::io::SeekFrom;
+use std::ptr::write;
 
 use anyhow::{Context, Result};
 use chrono::prelude::*;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use hdf5;
+use hdf5_sys::h5d::H5Dget_access_plist;
 use ndarray::{arr2};
 
 //Timing
 const HEARTBEAT_SLEEP_DURATION: Duration = Duration::from_micros(2500);
-const SWITCH_INTERVAL: Duration = Duration::from_secs(3600);
+const SWITCH_INTERVAL: Duration = Duration::from_secs(600);
 const PRINT_INTERVAL: u64 = 10000;
-const CLOSE_INTERVAL: Duration = Duration::from_secs(900);
 
 //File definitions
 const BAR1_NAME: &str = "/home/storm/Desktop/hdf5rustlocal/pcie_bar1_s5";
@@ -101,17 +103,15 @@ impl IntoIterator for DataContainer {
     }
 }
 
-
-
 fn main() -> Result<()> {
     //Handle ctrl+c by telling threads to finish
     ctrlc::set_handler(|| DONE.store(true, Ordering::SeqCst))?;
+    let mut thread_switch = time::Instant::now() + SWITCH_INTERVAL;
     println!("hdf5 threadsafe = {}", hdf5::is_library_threadsafe());
 
     //Initalize counters, files and channels
     let mut main_loop_counter: u64 = 0;
 
-    let (datasender, datareceiver) = sync_channel::<DataContainer>(DATA_BOUND);
     let (heartbeatsender, heartbeatreceiver) = sync_channel::<bool>(1);
 
     let mut dma_file = File::open(DMA_NAME)?;
@@ -133,71 +133,76 @@ fn main() -> Result<()> {
         false_heartbeat(HEARTBEAT_SLEEP_DURATION, heartbeatreceiver).unwrap();
     }
     );
-
-    //Spawn write thread
-    let write_handle = thread::spawn(move ||{
-        write_thread(datareceiver).context("Write thread error");
-    }
-    );
-
-    //Main loop
     while !DONE.load(Ordering::Relaxed) {
-        //Wait for file ready
-        //poll(&mut poll_array, Some(Duration::from_millis(1))).context("Failed on polling BAR")?;
-        let shot_start = time::Instant::now();
-        let shot_timestamp = Utc::now();
-
-        //Read data
-        let data_container = DataContainer{
-            internal_count: main_loop_counter,
-            datetime: shot_timestamp,
-            active_pulse: read_bar(&mut bar_file, ACTIVE_PULSE_OFFSET).context("Failed to read Active Pulse")?,
-            total_pulse: read_bar(&mut bar_file, TOTAL_PULSE_OFFSET).context("Failed to read Total Pulse")?,
-            state: read_bar(&mut bar_file, STATE_OFFSET).context("Failed to read State")? as u32,
-            kly_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 0 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[0]))?,
-            kly_fwd_pha: read_dma(&mut dma_file, ADC_OFFSET + 1 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[1]))?,
-            kly_rev_pwr: read_dma(&mut dma_file, ADC_OFFSET + 2 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[2]))?,
-            kly_rev_pha: read_dma(&mut dma_file, ADC_OFFSET + 3 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[3]))?,
-            cav_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 4 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[4]))?,
-            cav_fwd_pha: read_dma(&mut dma_file, ADC_OFFSET + 5 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[5]))?,
-            cav_rev_pwr: read_dma(&mut dma_file, ADC_OFFSET + 6 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[6]))?,
-            cav_rev_pha: read_dma(&mut dma_file, ADC_OFFSET + 7 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[7]))?,
-            cav_probe_pwr: read_dma(&mut dma_file, ADC_OFFSET + 8 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[8]))?,
-            cav_probe_pha: read_dma(&mut dma_file, ADC_OFFSET + 9 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[9]))?
-        };
-
-        let total_pulse = data_container.total_pulse;
-
-        //Try sending data to channel
-
-        match datasender.try_send(data_container) {
-            Ok(()) => {} // cool
-            Err(TrySendError::Full(_)) => {
-                println!("DANGER WILL ROBINSON - writer not keeping up!");
-                break;
-            }
-            Err(TrySendError::Disconnected(_)) => {
-                // The receiving side hung up!
-                // Bounce out of the loop to see what error it had.
-                break;
-            }
+        //Spawn write thread
+        let (datasender, datareceiver) = sync_channel::<DataContainer>(DATA_BOUND);
+        let write_handle = thread::spawn(move || {
+            write_thread(datareceiver).context("Write thread error");
         }
-        //Wait for next pulse (there must be a better way!)
-        while read_bar(&mut bar_file, TOTAL_PULSE_OFFSET)
-            .context("Failed to read Total Pulse")? == total_pulse {
+        );
+
+        //Main loop
+        while !DONE.load(Ordering::Relaxed)  {
+            //Wait for file ready
+            //poll(&mut poll_array, Some(Duration::from_millis(1))).context("Failed on polling BAR")?;
+            let shot_start = time::Instant::now();
+            let shot_timestamp = Utc::now();
+
+            //Read data
+            let data_container = DataContainer {
+                internal_count: main_loop_counter,
+                datetime: shot_timestamp,
+                active_pulse: read_bar(&mut bar_file, ACTIVE_PULSE_OFFSET).context("Failed to read Active Pulse")?,
+                total_pulse: read_bar(&mut bar_file, TOTAL_PULSE_OFFSET).context("Failed to read Total Pulse")?,
+                state: read_bar(&mut bar_file, STATE_OFFSET).context("Failed to read State")? as u32,
+                kly_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 0 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[0]))?,
+                kly_fwd_pha: read_dma(&mut dma_file, ADC_OFFSET + 1 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[1]))?,
+                kly_rev_pwr: read_dma(&mut dma_file, ADC_OFFSET + 2 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[2]))?,
+                kly_rev_pha: read_dma(&mut dma_file, ADC_OFFSET + 3 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[3]))?,
+                cav_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 4 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[4]))?,
+                cav_fwd_pha: read_dma(&mut dma_file, ADC_OFFSET + 5 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[5]))?,
+                cav_rev_pwr: read_dma(&mut dma_file, ADC_OFFSET + 6 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[6]))?,
+                cav_rev_pha: read_dma(&mut dma_file, ADC_OFFSET + 7 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[7]))?,
+                cav_probe_pwr: read_dma(&mut dma_file, ADC_OFFSET + 8 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[8]))?,
+                cav_probe_pha: read_dma(&mut dma_file, ADC_OFFSET + 9 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[9]))?
+            };
+
+            let total_pulse = data_container.total_pulse;
+
+            //Try sending data to channel
+
+            match datasender.try_send(data_container) {
+                Ok(()) => {} // cool
+                Err(TrySendError::Full(_)) => {
+                    println!("DANGER WILL ROBINSON - writer not keeping up!");
+                    break;
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    // The receiving side hung up!
+                    // Bounce out of the loop to see what error it had.
+                    break;
+                }
+            }
+            //Wait for next pulse (there must be a better way!)
+            while read_bar(&mut bar_file, TOTAL_PULSE_OFFSET)
+                .context("Failed to read Total Pulse")? == total_pulse {
                 std::hint::spin_loop();
+            }
+            if main_loop_counter % PRINT_INTERVAL == 0 {
+                println! {"Pulse number: {}. Time around the loop: {} us",
+                          total_pulse, shot_start.elapsed().as_micros()};
+            }
+            main_loop_counter += 1;
+            if time::Instant::now() > thread_switch {
+                thread_switch = time::Instant::now() + SWITCH_INTERVAL;
+                break;
+            }
         }
-        if main_loop_counter % PRINT_INTERVAL == 0 {
-            println! {"Pulse number: {}. Time around the loop: {} us",
-                      total_pulse, shot_start.elapsed().as_micros()};
-        }
-        main_loop_counter += 1;
-
-
+        //Handle closing
+        drop(datasender);
+        write_handle.join();
+        //Dropping the datasender should hangup
     }
-    //Handle closing
-    drop(datasender);
-    //Dropping the datasender should hangup
     match heartbeatsender.try_send(true) {
         Ok(()) => {
             println!("Shutting down heartbeat thread");
@@ -213,7 +218,7 @@ fn main() -> Result<()> {
             //Heartbeat thread is already dead, no need to do anything
         }
     }
-    write_handle.join().expect("Write thread is already dead");
+    //write_handle.join().expect("Write thread is already dead");
     //Join write thread to wait for shutdown
     println!("SHUTDOWN: {}", main_loop_counter);
     Ok(())
@@ -241,7 +246,6 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     let mut rolling_avg:Vec<i64> = Vec::new();
     let mut write_start = time::Instant::now();
     let mut next_switch = write_start + SWITCH_INTERVAL;
-    let mut next_close = write_start + CLOSE_INTERVAL;
     let fnamenow = Utc::now()
         .format("%Y-%m-%d %H:%M:%S.%f.h5")
         .to_string();
@@ -249,8 +253,12 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     let mut hdffname_move = NAS_LOC.to_owned() +&fnamenow;
     hdf5::File::create(&hdffname)
         .context("Failed to open hdffile")?;
-    let mut hdffile = hdf5::File::open_rw(&hdffname)
+    let mut filebuilder = hdf5::file::FileBuilder::new();
+    let mut plist = filebuilder.fapl();
+    plist.evict_on_close(true);
+    let mut hdffile = filebuilder.open_rw(&hdffname)
         .context("Failed to open hdffile")?;
+
 
     //let mut bin_write = File::create(TMP_LOC.to_owned() + "binfile")
     //    .context("Failed to open binfile")?;
@@ -262,12 +270,6 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
                 //Received data, write it to file
                 write_start = time::Instant::now();
                 let total_pulse = data.total_pulse;
-                if time::Instant::now() > next_close{
-                    hdffile.close()
-                        .context("Failed to close HDF file after 15 mins")?;
-                    hdffile = hdf5::File::open_rw(&hdffname)
-                        .context("Failed to open hdffile")?;
-                }
 
                 write_hdf(&hdffile, data, &total_pulse)
                     .context("Failed to write binary file")?;
@@ -299,8 +301,11 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
         if time::Instant::now() > next_switch {
             //Switch to next hdf5file
 
-            hdffile.close()
-                .context("Failed to close hdffile")?;
+            let file_id = hdffile.id();
+            unsafe{
+                hdf5_sys::h5f::H5Fclose(file_id);
+            }
+
             let old_hdffname = hdffname.to_owned();
             let old_hdffname_move = hdffname_move.to_owned();
             thread::spawn(move || {
@@ -409,6 +414,7 @@ fn write_hdf(hdffile: &hdf5::File, data: DataContainer, counter: &u64) -> Result
         [data.cav_probe_pha]
     ]);
 
+
     write_hdf_ds(&hdfgroup, "waveforms", &ds_data).unwrap();
     let hdf_time_ds = &hdf_time.elapsed().as_micros()-hdf_time_attr;
 
@@ -417,6 +423,10 @@ fn write_hdf(hdffile: &hdf5::File, data: DataContainer, counter: &u64) -> Result
             .context("Failed to flush file")?;
     }
     let hdf_time_flush = &hdf_time.elapsed().as_micros()-hdf_time_ds;
+    let group_id = hdfgroup.id();
+    unsafe{
+        hdf5_sys::h5g::H5Gclose(group_id);
+    }
     //drop(hdffile);
     unsafe {hdf5_sys::h5::H5garbage_collect();}
     let hdf_time_drop = &hdf_time.elapsed().as_micros()-hdf_time_flush;
@@ -448,14 +458,27 @@ fn write_hdf_attr(hdfgroup: &hdf5::Group, name: &str, data: u64) -> Result<()> {
 
 //fn write_hdf_ds(hdfgroup: &hdf5::Group, name: &str, data: &[u16; SAMPLES]) -> Result<()> {
 fn write_hdf_ds(hdfgroup: &hdf5::Group, name: &str, data: &ndarray::Array2<[u16; SAMPLES]>) -> Result<()> {
+
     let builder = hdfgroup
         .new_dataset_builder();
-        //.chunk(CHUNK_SIZE);
 
-    builder
+    let ds = builder
         .with_data(data)
-        .create(name)
-        .with_context(|| format!("Failed to write dataset {}", name))?;
+        .create(name)?;
+
+    let dsid = ds.id();
+    unsafe {
+        let dsplist_id = H5Dget_access_plist(dsid);
+        hdf5_sys::h5p::H5Pclose(dsplist_id);
+        hdf5_sys::h5d::H5Dclose(dsid);
+        //hdf5_sys::h5p::H5Pclose(dsplist_id);
+    }
+    //drop(ds);
+    //drop(dsid);
+
+
+    //let ds = ds.create(name);
+
     Ok(())
 }
 
