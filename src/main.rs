@@ -255,7 +255,10 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
                 let total_pulse = data.total_pulse;
 
                 //TODO: Write to JSON
-                
+                write_buffer.write_all(&simd_json::to_vec(&data).context("Failed to convert data to writable vector")?)
+                    .context("Failed to write data to BufWriter")?;
+                write_buffer.write(b"\n")
+                    .context("Failed to write newline to BufWriter")?;
 
                 rolling_avg.push(write_start.elapsed().as_micros() as i64);
 
