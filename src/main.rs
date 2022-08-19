@@ -64,44 +64,26 @@ struct DataContainer {
     active_pulse: u64,
     total_pulse: u64,
     state: u32,
-    kly_fwd_pwr: [u16; SAMPLES],
-    kly_fwd_pha: [u16; SAMPLES],
-    kly_rev_pwr: [u16; SAMPLES],
-    kly_rev_pha: [u16; SAMPLES],
-    cav_fwd_pwr: [u16; SAMPLES],
-    cav_fwd_pha: [u16; SAMPLES],
-    cav_rev_pwr: [u16; SAMPLES],
-    cav_rev_pha: [u16; SAMPLES],
-    cav_probe_pwr: [u16; SAMPLES],
-    cav_probe_pha: [u16; SAMPLES]
+    waveforms: WaveData
 }
-
-impl IntoIterator for DataContainer {
-    type Item = [u16; SAMPLES];
-    type IntoIter = std::array::IntoIter<Self::Item, 10>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        let iter_array = [
-            self.kly_fwd_pwr,
-            self.kly_fwd_pha,
-            self.kly_rev_pwr,
-            self.kly_rev_pha,
-            self.cav_fwd_pwr,
-            self.cav_fwd_pha,
-            self.cav_rev_pwr,
-            self.cav_rev_pha,
-            self.cav_probe_pwr,
-            self.cav_probe_pha
-        ];
-        iter_array.into_iter()
-    }
+#[derive(Debug)]
+struct WaveData {
+    kly_fwd_pwr: Vec<u16>,
+    kly_fwd_pha: Vec<u16>,
+    kly_rev_pwr: Vec<u16>,
+    kly_rev_pha: Vec<u16>,
+    cav_fwd_pwr: Vec<u16>,
+    cav_fwd_pha: Vec<u16>,
+    cav_rev_pwr: Vec<u16>,
+    cav_rev_pha: Vec<u16>,
+    cav_probe_pwr: Vec<u16>,
+    cav_probe_pha: Vec<u16>
 }
 
 fn main() -> Result<()> {
     //Handle ctrl+c by telling threads to finish
     ctrlc::set_handler(|| DONE.store(true, Ordering::SeqCst))?;
     let mut thread_switch = time::Instant::now() + SWITCH_INTERVAL;
-    println!("hdf5 threadsafe = {}", hdf5::is_library_threadsafe());
 
     //Initalize counters, files and channels
     let mut main_loop_counter: u64 = 0;
@@ -143,12 +125,7 @@ fn main() -> Result<()> {
             let shot_timestamp = Utc::now();
 
             //Read data
-            let data_container = DataContainer {
-                internal_count: main_loop_counter,
-                datetime: shot_timestamp,
-                active_pulse: read_bar(&mut bar_file, ACTIVE_PULSE_OFFSET).context("Failed to read Active Pulse")?,
-                total_pulse: read_bar(&mut bar_file, TOTAL_PULSE_OFFSET).context("Failed to read Total Pulse")?,
-                state: read_bar(&mut bar_file, STATE_OFFSET).context("Failed to read State")? as u32,
+            let wave_data = WaveData{
                 kly_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 0 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[0]))?,
                 kly_fwd_pha: read_dma(&mut dma_file, ADC_OFFSET + 1 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[1]))?,
                 kly_rev_pwr: read_dma(&mut dma_file, ADC_OFFSET + 2 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[2]))?,
@@ -159,6 +136,15 @@ fn main() -> Result<()> {
                 cav_rev_pha: read_dma(&mut dma_file, ADC_OFFSET + 7 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[7]))?,
                 cav_probe_pwr: read_dma(&mut dma_file, ADC_OFFSET + 8 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[8]))?,
                 cav_probe_pha: read_dma(&mut dma_file, ADC_OFFSET + 9 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[9]))?
+            };
+
+            let data_container = DataContainer {
+                internal_count: main_loop_counter,
+                datetime: shot_timestamp,
+                active_pulse: read_bar(&mut bar_file, ACTIVE_PULSE_OFFSET).context("Failed to read Active Pulse")?,
+                total_pulse: read_bar(&mut bar_file, TOTAL_PULSE_OFFSET).context("Failed to read Total Pulse")?,
+                state: read_bar(&mut bar_file, STATE_OFFSET).context("Failed to read State")? as u32,
+                waveforms: wave_data
             };
 
             let total_pulse = data_container.total_pulse;
@@ -225,8 +211,8 @@ fn read_bar(buffer: &mut File, offset: u64) ->Result<u64> {
     Ok(output[0])
 }
 
-fn read_dma(buffer: &mut File, offset: u64) -> Result<[u16; SAMPLES]> {
-    let mut output: [u16; SAMPLES] = [0; SAMPLES];
+fn read_dma(buffer: &mut File, offset: u64) -> Result<Vec<u16>> {
+    let mut output: Vec<u16> = Vec::new();
     buffer.seek(SeekFrom::Start(offset))
         .with_context(|| format!("Error while seeking to {} in {:?}", offset, buffer))?;
     buffer.read_u16_into::<LittleEndian>(&mut output)
