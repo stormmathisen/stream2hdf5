@@ -112,6 +112,7 @@ fn main() -> Result<()> {
     //Initalize counters, files and channels
     let mut main_loop_counter: u64 = 0;
 
+    let (datasender, datareceiver) = sync_channel::<DataContainer>(DATA_BOUND);
     let (heartbeatsender, heartbeatreceiver) = sync_channel::<bool>(1);
 
     let mut dma_file = File::open(DMA_NAME)?;
@@ -133,9 +134,8 @@ fn main() -> Result<()> {
         false_heartbeat(HEARTBEAT_SLEEP_DURATION, heartbeatreceiver).unwrap();
     }
     );
-    while !DONE.load(Ordering::Relaxed) {
         //Spawn write thread
-        let (datasender, datareceiver) = sync_channel::<DataContainer>(DATA_BOUND);
+        
         let write_handle = thread::spawn(move || {
             write_thread(datareceiver).context("Write thread error");
         }
@@ -200,9 +200,8 @@ fn main() -> Result<()> {
         }
         //Handle closing
         drop(datasender);
-        write_handle.join();
         //Dropping the datasender should hangup
-    }
+
     match heartbeatsender.try_send(true) {
         Ok(()) => {
             println!("Shutting down heartbeat thread");
@@ -218,11 +217,12 @@ fn main() -> Result<()> {
             //Heartbeat thread is already dead, no need to do anything
         }
     }
-    //write_handle.join().expect("Write thread is already dead");
+    write_handle.join().expect("Write thread is already dead");
     //Join write thread to wait for shutdown
     println!("SHUTDOWN: {}", main_loop_counter);
     Ok(())
 }
+
 
 fn read_bar(buffer: &mut File, offset: u64) ->Result<u64> {
     let mut output: [u64; 1] = [0; 1];
