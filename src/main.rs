@@ -4,6 +4,9 @@
 use std::fs::File;
 use std::fs::OpenOptions;
 
+use serde::{Deserialize, Serialize};
+use simd_json;
+
 use std::io::BufWriter;
 use std::io::prelude::*;
 use std::sync::{
@@ -250,6 +253,7 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
                 let total_pulse = data.total_pulse;
 
                 //TODO: Write to JSON
+                
 
                 rolling_avg.push(write_start.elapsed().as_micros() as i64);
 
