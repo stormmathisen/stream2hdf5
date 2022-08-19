@@ -4,6 +4,7 @@
 use std::fs::File;
 use std::fs::OpenOptions;
 
+use std::io::BufWriter;
 use std::io::prelude::*;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -232,7 +233,14 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     let mut json_path = TMP_LOC.to_owned() + &json_file_name;
     let mut move_path = NAS_LOC.to_owned() +&json_file_name;
 
-    //TODO: Create JSON file
+    File::create(&json_file_name)
+        .with_context(||format!("Failed to create JSON file {}", &json_file_name))?;
+    let f = OpenOptions::new()
+        .append(true)
+        .open(&json_file_name)
+        .with_context(||format!("Failed to create JSON file {}", &json_file_name))?;
+
+    let mut write_buffer = BufWriter::new(f);
 
     loop{
         match receiver.recv_timeout(time::Duration::from_micros(3000)) {
