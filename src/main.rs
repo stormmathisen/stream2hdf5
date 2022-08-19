@@ -11,17 +11,11 @@ use std::sync::{
 };
 use std::time::Duration;
 use std::{thread, time};
-use std::any::Any;
 use std::io::SeekFrom;
-use std::ptr::write;
 
 use anyhow::{Context, Result};
 use chrono::prelude::*;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
-use hdf5;
-use hdf5_sys::h5d::H5Dget_access_plist;
-use ndarray::{arr2};
 
 //Timing
 const HEARTBEAT_SLEEP_DURATION: Duration = Duration::from_micros(2500);
@@ -246,23 +240,13 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     let mut rolling_avg:Vec<i64> = Vec::new();
     let mut write_start = time::Instant::now();
     let mut next_switch = write_start + SWITCH_INTERVAL;
-    let fnamenow = Utc::now()
-        .format("%Y-%m-%d %H:%M:%S.%f.h5")
+    let mut json_file_name = Utc::now()
+        .format("%Y-%m-%d %H:%M:%S.%f.json")
         .to_string();
-    let mut hdffname = TMP_LOC.to_owned() + &fnamenow;
-    let mut hdffname_move = NAS_LOC.to_owned() +&fnamenow;
-    hdf5::File::create(&hdffname)
-        .context("Failed to open hdffile")?;
-    let mut filebuilder = hdf5::file::FileBuilder::new();
-    let mut plist = filebuilder.fapl();
-    plist.evict_on_close(true);
-    let mut hdffile = filebuilder.open_rw(&hdffname)
-        .context("Failed to open hdffile")?;
+    let mut json_path = TMP_LOC.to_owned() + &json_file_name;
+    let mut move_path = NAS_LOC.to_owned() +&json_file_name;
 
-
-    //let mut bin_write = File::create(TMP_LOC.to_owned() + "binfile")
-    //    .context("Failed to open binfile")?;
-
+    //TODO: Create JSON file
 
     loop{
         match receiver.recv_timeout(time::Duration::from_micros(3000)) {
@@ -271,9 +255,7 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
                 write_start = time::Instant::now();
                 let total_pulse = data.total_pulse;
 
-                write_hdf(&hdffile, data, &total_pulse)
-                    .context("Failed to write binary file")?;
-                //thread::sleep(time::Duration::from_micros(1500));
+                //TODO: Write to JSON
 
                 rolling_avg.push(write_start.elapsed().as_micros() as i64);
 
@@ -299,188 +281,50 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
             }
         }
         if time::Instant::now() > next_switch {
-            //Switch to next hdf5file
+            //Switch to next file
+            let old_json_path = json_path.to_owned();
+            let old_move_path = move_path.to_owned();
 
-            let file_id = hdffile.id();
-            unsafe{
-                hdf5_sys::h5f::H5Fclose(file_id);
-            }
-
-            let old_hdffname = hdffname.to_owned();
-            let old_hdffname_move = hdffname_move.to_owned();
             thread::spawn(move || {
-                match std::fs::copy(&old_hdffname, &old_hdffname_move){
+                match std::fs::copy(&old_json_path, &old_move_path){
                     Ok(_) => {
                         println!("Finished copying file!");
-                        std::fs::remove_file(&old_hdffname);
+                        std::fs::remove_file(&old_json_path);
                     }
                     Err(error) => {println!("{:?}", error)}
                 }
             });
 
-            let fnamenow = Utc::now()
+            json_file_name = Utc::now()
                 .format("%Y-%m-%d %H:%M:%S.%f.h5")
                 .to_string();
-            hdffname = TMP_LOC.to_owned() + &fnamenow;
-            hdffname_move = NAS_LOC.to_owned() +&fnamenow;
-            hdf5::File::create(&hdffname)
-                .context("Failed to open hdffile")?;
-            hdffile = hdf5::File::open_rw(&hdffname)
-                .context("Failed to open hdffile")?;
+            json_path = TMP_LOC.to_owned() + &json_file_name;
+            move_path = NAS_LOC.to_owned() +&json_file_name;
+
+            //TODO: CREATE NEW FILE
+
             next_switch = time::Instant::now()+ SWITCH_INTERVAL;
 
         }
     }
-    hdffile.close()
-        .context("Failed to close hdffile")?;
     let move_thread = thread::spawn(move || {
-        match std::fs::copy(&hdffname, &hdffname_move){
+        match std::fs::copy(&json_path, &move_path){
             Ok(_) => {
                 println!("Finished copying file!");
-                std::fs::remove_file(&hdffname);
+                std::fs::remove_file(&json_path);
             }
             Err(error) => {println!("{:?}", error)}
-        }    });
+        }
+    });
+
     move_thread.join().expect("Sorry, can't copy the last file");
+
     println!("Write thread: {}", write_count);
     println!("Rolling avg is {:?} us", rolling_avg);
-    Ok(())
-}
-
-fn write_binary(buffer: &mut File, data: DataContainer) -> Result<()> {
-    buffer.write_u64::<LittleEndian>(data.internal_count)
-        .with_context(|| format!("Failed to write internal count ({})", data.internal_count))?;
-
-    buffer.write_u64::<LittleEndian>(data.datetime.timestamp_nanos() as u64)
-        .with_context(|| format!("Failed to write timestamp ({})", data.datetime.timestamp_nanos() as u64))?;
-    
-    buffer.write_u64::<LittleEndian>(data.active_pulse)
-        .with_context(|| format!("Failed to write active pulse ({})", data.active_pulse))?;
-
-    buffer.write_u64::<LittleEndian>(data.total_pulse)
-        .with_context(|| format!("Failed to write total pulse ({})", data.total_pulse))?;
-
-    buffer.write_u64::<LittleEndian>(data.state as u64)
-        .with_context(|| format!("Failed to write state ({})", data.state as u64))?;
-    let mut i = 0;
-    for array in data.into_iter() {
-        for ii in 0..128 {
-            buffer.write_u16::<LittleEndian>(array[ii])
-                .with_context(|| format!("Failed to write sample {} of {}", ii, DATA_FIELD_NAMES[i]))?;
-        }
-        i += 1;
-    }
-    Ok(())
-}
-
-
-fn write_hdf(hdffile: &hdf5::File, data: DataContainer, counter: &u64) -> Result<()> {
-    let hdf_time = time::Instant::now();
-    let timestamp = &data.datetime.format("%Y-%m-%d %H:%M:%S.%f").to_string();
-    let hdf_time_timestamp = &hdf_time.elapsed().as_micros();
-    let hdf_time_open = &hdf_time.elapsed().as_micros()-hdf_time_timestamp;
-    let hdfgroup = hdffile
-        .create_group(timestamp)
-        .with_context(|| format!("Failed to create group at {}", timestamp))?;
-    let hdf_time_group = &hdf_time.elapsed().as_micros()-hdf_time_open;
-
-    //Write attributes
-    write_hdf_attr(&hdfgroup, "internal_count", data.internal_count)
-        .context("Failed to call write_hdf_attr for internal_count")?;
-
-    write_hdf_attr(&hdfgroup, "datetime", data.datetime.timestamp_nanos() as u64)
-        .context("Failed to call write_hdf_attr for datetime")?;
-
-    write_hdf_attr(&hdfgroup, "active_pulse", data.active_pulse)
-        .context("Failed to call write_hdf_attr for active_pulse")?;
-
-    write_hdf_attr(&hdfgroup, "total_pulse", data.total_pulse)
-        .context("Failed to call write_hdf_attr for total_pulse")?;
-
-    write_hdf_attr(&hdfgroup, "state", data.state as u64)
-        .context("Failed to call write_hdf_attr for state")?;
-    let hdf_time_attr = &hdf_time.elapsed().as_micros()-hdf_time_group;
-
-    let ds_data = arr2(&[
-        [data.kly_fwd_pwr],
-        [data.kly_fwd_pha],
-        [data.kly_rev_pwr],
-        [data.kly_rev_pha],
-        [data.cav_fwd_pwr],
-        [data.cav_fwd_pha],
-        [data.cav_rev_pwr],
-        [data.cav_rev_pha],
-        [data.cav_probe_pwr],
-        [data.cav_probe_pha]
-    ]);
-
-
-    write_hdf_ds(&hdfgroup, "waveforms", &ds_data).unwrap();
-    let hdf_time_ds = &hdf_time.elapsed().as_micros()-hdf_time_attr;
-
-    if counter % 400 == 0 {
-        hdffile.flush()
-            .context("Failed to flush file")?;
-    }
-    let hdf_time_flush = &hdf_time.elapsed().as_micros()-hdf_time_ds;
-    let group_id = hdfgroup.id();
-    unsafe{
-        hdf5_sys::h5g::H5Gclose(group_id);
-    }
-    //drop(hdffile);
-    unsafe {hdf5_sys::h5::H5garbage_collect();}
-    let hdf_time_drop = &hdf_time.elapsed().as_micros()-hdf_time_flush;
-    if counter % PRINT_INTERVAL == 0 {
-        println!("Timestamp: {}\nOpen: {}\nGroup: {}\nAttr: {}\nDS: {}\nFlush: {}\nDrop: {}",
-            hdf_time_timestamp,
-            hdf_time_open,
-            hdf_time_group,
-            hdf_time_attr,
-            hdf_time_ds,
-            hdf_time_flush,
-            hdf_time_drop)
-    }
-    Ok(())
-}
-
-fn write_hdf_attr(hdfgroup: &hdf5::Group, name: &str, data: u64) -> Result<()> {
-    let attr = hdfgroup
-        .new_attr::<u64>()
-        .shape([1])
-        .create(name)
-        .with_context(|| format!("Unable to create attr {}", name))?;
-    attr
-        .write(&[data])
-        .with_context(|| format!("Unable to write {} to attr {}", data, name))?;
-    drop(attr);
-    Ok(())
-}
-
-//fn write_hdf_ds(hdfgroup: &hdf5::Group, name: &str, data: &[u16; SAMPLES]) -> Result<()> {
-fn write_hdf_ds(hdfgroup: &hdf5::Group, name: &str, data: &ndarray::Array2<[u16; SAMPLES]>) -> Result<()> {
-
-    let builder = hdfgroup
-        .new_dataset_builder();
-
-    let ds = builder
-        .with_data(data)
-        .create(name)?;
-
-    let dsid = ds.id();
-    unsafe {
-        let dsplist_id = H5Dget_access_plist(dsid);
-        hdf5_sys::h5p::H5Pclose(dsplist_id);
-        hdf5_sys::h5d::H5Dclose(dsid);
-        //hdf5_sys::h5p::H5Pclose(dsplist_id);
-    }
-    //drop(ds);
-    //drop(dsid);
-
-
-    //let ds = ds.create(name);
 
     Ok(())
 }
+
 
 fn false_heartbeat(pulse_rate: Duration, ctrl: Receiver<bool>) -> Result<()>{
     let mut pulse_counter: u64 = 0;
