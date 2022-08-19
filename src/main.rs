@@ -61,16 +61,17 @@ const CHUNK_SIZE: usize = 16; //HDF5 chunk size
 
 
 
-#[derive(Debug)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct DataContainer {
     internal_count: u64,
-    datetime: DateTime<Utc>,
+    secs: i64,
+    nanos: u32,
     active_pulse: u64,
     total_pulse: u64,
     state: u32,
     waveforms: WaveData
 }
-#[derive(Debug)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct WaveData {
     kly_fwd_pwr: Vec<u16>,
     kly_fwd_pha: Vec<u16>,
@@ -144,7 +145,8 @@ fn main() -> Result<()> {
 
             let data_container = DataContainer {
                 internal_count: main_loop_counter,
-                datetime: shot_timestamp,
+                secs: shot_timestamp.timestamp(),
+                nanos: shot_timestamp.timestamp_subsec_nanos(),
                 active_pulse: read_bar(&mut bar_file, ACTIVE_PULSE_OFFSET).context("Failed to read Active Pulse")?,
                 total_pulse: read_bar(&mut bar_file, TOTAL_PULSE_OFFSET).context("Failed to read Total Pulse")?,
                 state: read_bar(&mut bar_file, STATE_OFFSET).context("Failed to read State")? as u32,
