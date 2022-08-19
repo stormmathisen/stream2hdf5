@@ -240,7 +240,7 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
 
     File::create(&json_file_name)
         .with_context(||format!("Failed to create JSON file {}", &json_file_name))?;
-    let f = OpenOptions::new()
+    let mut f = OpenOptions::new()
         .append(true)
         .open(&json_file_name)
         .with_context(||format!("Failed to create JSON file {}", &json_file_name))?;
@@ -254,7 +254,6 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
                 write_start = time::Instant::now();
                 let total_pulse = data.total_pulse;
 
-                //TODO: Write to JSON
                 write_buffer.write_all(&simd_json::to_vec(&data).context("Failed to convert data to writable vector")?)
                     .context("Failed to write data to BufWriter")?;
                 write_buffer.write(b"\n")
@@ -304,7 +303,15 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
             json_path = TMP_LOC.to_owned() + &json_file_name;
             move_path = NAS_LOC.to_owned() +&json_file_name;
 
-            //TODO: CREATE NEW FILE
+            File::create(&json_file_name)
+                .with_context(||format!("Failed to create JSON file {}", &json_file_name))?;
+            f = OpenOptions::new()
+                .append(true)
+                .open(&json_file_name)
+                .with_context(||format!("Failed to create JSON file {}", &json_file_name))?;
+            
+            write_buffer = BufWriter::new(f);
+    
 
             next_switch = time::Instant::now()+ SWITCH_INTERVAL;
 
