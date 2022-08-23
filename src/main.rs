@@ -4,6 +4,8 @@ use filedescriptor::*;
 use std::fs::File;
 use std::fs::OpenOptions;
 
+use std::io::{Cursor, Read};
+
 use serde::{Deserialize, Serialize};
 use simd_json;
 
@@ -132,6 +134,11 @@ fn main() -> Result<()> {
             let shot_start = time::Instant::now();
             let shot_timestamp = Utc::now();
 
+            let mut packet = [0u8; 4096];
+            dma_file.read_exact(&mut packet)
+                .context("Failed to read packet from DMA")?;
+            let mut dma_reader = Cursor::new(packet);
+
             //Read data
             let wave_data = WaveData{
                 kly_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 0 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[0]))?,
@@ -203,6 +210,7 @@ fn read_bar(buffer: &mut File, offset: u64) ->Result<u64> {
 
 fn read_dma(buffer: &mut File, offset: u64) -> Result<Vec<u16>> {
     let mut output: [u16; SAMPLES] = [0; SAMPLES];
+
     buffer.seek(SeekFrom::Start(offset))
         .with_context(|| format!("Error while seeking to {} in {:?}", offset, buffer))?;
     buffer.read_u16_into::<LittleEndian>(&mut output)
