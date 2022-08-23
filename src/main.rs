@@ -23,8 +23,8 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 //Timing
 const HEARTBEAT_SLEEP_DURATION: Duration = Duration::from_micros(2500);
-const SWITCH_INTERVAL: Duration = Duration::from_secs(600);
-const PRINT_INTERVAL: u64 = 10000;
+const SWITCH_INTERVAL: Duration = Duration::from_secs(3600);
+const PRINT_INTERVAL: u64 = 50000;
 
 //File definitions
 const BAR1_NAME: &str = "/home/storm/Desktop/hdf5rustlocal/pcie_bar1_s5";
@@ -88,7 +88,6 @@ struct WaveData {
 fn main() -> Result<()> {
     //Handle ctrl+c by telling threads to finish
     ctrlc::set_handler(|| DONE.store(true, Ordering::SeqCst))?;
-    let mut thread_switch = time::Instant::now() + SWITCH_INTERVAL;
 
     //Initalize counters, files and channels
     let mut main_loop_counter: u64 = 0;
@@ -96,9 +95,10 @@ fn main() -> Result<()> {
     let (datasender, datareceiver) = sync_channel::<DataContainer>(DATA_BOUND);
     let (heartbeatsender, heartbeatreceiver) = sync_channel::<bool>(1);
 
-    let mut dma_file = File::open(DMA_NAME)?;
-    let mut bar_file = File::open(BAR1_NAME)
+    let mut dma_file = File::open(DMA_NAME)
         .with_context(|| format!("Failed to open {}", DMA_NAME))?;
+    let mut bar_file = File::open(BAR1_NAME)
+        .with_context(|| format!("Failed to open {}", BAR1_NAME))?;
     /*let mut bar_fd = FileDescriptor::dup(&bar_file)?;
     let mut poll_array = [
         pollfd {
@@ -143,7 +143,7 @@ fn main() -> Result<()> {
                 cav_probe_pha: read_dma(&mut dma_file, ADC_OFFSET + 9 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[9]))?
             };
 
-            let data_container = DataContainer {
+           let data_container = DataContainer {
                 internal_count: main_loop_counter,
                 secs: shot_timestamp.timestamp(),
                 nanos: shot_timestamp.timestamp_subsec_nanos(),
@@ -179,10 +179,6 @@ fn main() -> Result<()> {
                           total_pulse, shot_start.elapsed().as_micros()};
             }
             main_loop_counter += 1;
-            if time::Instant::now() > thread_switch {
-                thread_switch = time::Instant::now() + SWITCH_INTERVAL;
-                break;
-            }
         }
         //Handle closing
         drop(datasender);
@@ -218,12 +214,13 @@ fn read_bar(buffer: &mut File, offset: u64) ->Result<u64> {
 }
 
 fn read_dma(buffer: &mut File, offset: u64) -> Result<Vec<u16>> {
-    let mut output: Vec<u16> = Vec::new();
+    let mut output: [u16; SAMPLES] = [0; SAMPLES];
     buffer.seek(SeekFrom::Start(offset))
         .with_context(|| format!("Error while seeking to {} in {:?}", offset, buffer))?;
     buffer.read_u16_into::<LittleEndian>(&mut output)
         .with_context(|| format!("Error while reading {:?} into {:?}", buffer, output))?;
-    Ok(output)
+    let mut output_vec = output.to_vec();
+    Ok(output_vec)
 }
 
 
@@ -238,12 +235,12 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
     let mut json_path = TMP_LOC.to_owned() + &json_file_name;
     let mut move_path = NAS_LOC.to_owned() +&json_file_name;
 
-    File::create(&json_file_name)
-        .with_context(||format!("Failed to create JSON file {}", &json_file_name))?;
+    File::create(&json_path)
+        .with_context(||format!("Failed to create JSON file {}", &json_path))?;
     let mut f = OpenOptions::new()
         .append(true)
-        .open(&json_file_name)
-        .with_context(||format!("Failed to create JSON file {}", &json_file_name))?;
+        .open(&json_path)
+        .with_context(||format!("Failed to create JSON file {}", &json_path))?;
 
     let mut write_buffer = BufWriter::new(f);
 
@@ -298,17 +295,17 @@ fn write_thread (receiver: Receiver<DataContainer>) -> Result<()> {
             });
 
             json_file_name = Utc::now()
-                .format("%Y-%m-%d %H:%M:%S.%f.h5")
+                .format("%Y-%m-%d %H:%M:%S.%f.json")
                 .to_string();
             json_path = TMP_LOC.to_owned() + &json_file_name;
             move_path = NAS_LOC.to_owned() +&json_file_name;
 
-            File::create(&json_file_name)
-                .with_context(||format!("Failed to create JSON file {}", &json_file_name))?;
+            File::create(&json_path)
+                .with_context(||format!("Failed to create JSON file {}", &json_path))?;
             f = OpenOptions::new()
                 .append(true)
-                .open(&json_file_name)
-                .with_context(||format!("Failed to create JSON file {}", &json_file_name))?;
+                .open(&json_path)
+                .with_context(||format!("Failed to create JSON file {}", &json_path))?;
             
             write_buffer = BufWriter::new(f);
     
