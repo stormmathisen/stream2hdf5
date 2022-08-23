@@ -134,7 +134,7 @@ fn main() -> Result<()> {
             let shot_start = time::Instant::now();
             let shot_timestamp = Utc::now();
 
-            let mut packet = [0u8; 4096];
+            let mut packet = [0u8; 24];
             dma_file.read_exact(&mut packet)
                 .context("Failed to read packet from DMA")?;
             let mut dma_reader = Cursor::new(packet);
@@ -208,7 +208,7 @@ fn read_bar(buffer: &mut File, offset: u64) ->Result<u64> {
     Ok(output[0])
 }
 
-fn read_dma(buffer: &mut Cursor<[u8; 4096]>, offset: u64) -> Result<Vec<u16>> {
+fn read_dma(buffer: &mut Cursor<[u8; 24]>, offset: u64) -> Result<Vec<u16>> {
     let mut output: [u16; SAMPLES] = [0; SAMPLES];
 
     buffer.seek(SeekFrom::Start(offset))
