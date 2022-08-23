@@ -27,10 +27,10 @@ const SWITCH_INTERVAL: Duration = Duration::from_secs(3600);
 const PRINT_INTERVAL: u64 = 50000;
 
 //File definitions
-const BAR1_NAME: &str = "/home/storm/Desktop/hdf5rustlocal/pcie_bar1_s5";
-const DMA_NAME: &str = "/home/storm/Desktop/hdf5rustlocal/pcie_dma_s5";
-const NAS_LOC: &str = "/home/storm/Desktop/hdf5rustlocal/NAS/"; //Location to move hdf5 files at midnight
-const TMP_LOC: &str = "/home/storm/Desktop/hdf5rustlocal/TMP/"; //Location to store locally
+const BAR1_NAME: &str = "/dev/pcie_bar1_s3";
+const DMA_NAME: &str = "/dev/pcie_dma_s3";
+const NAS_LOC: &str = "/home/sinap/Desktop/stream2hdf5/NAS/"; //Location to move hdf5 files at midnight
+const TMP_LOC: &str = "/home/sinap/Desktop/stream2hdf5/TMP/"; //Location to store locally
 
 //Data definitions
 const SAMPLES: usize = 512; //Number of samples in each array
@@ -93,7 +93,6 @@ fn main() -> Result<()> {
     let mut main_loop_counter: u64 = 0;
 
     let (datasender, datareceiver) = sync_channel::<DataContainer>(DATA_BOUND);
-    let (heartbeatsender, heartbeatreceiver) = sync_channel::<bool>(1);
 
     let mut dma_file = File::open(DMA_NAME)
         .with_context(|| format!("Failed to open {}", DMA_NAME))?;
@@ -111,10 +110,6 @@ fn main() -> Result<()> {
 
 
     //Spawn fake heartbeat thread
-    let heartbeat_handle = thread::spawn(move || {
-        false_heartbeat(HEARTBEAT_SLEEP_DURATION, heartbeatreceiver).unwrap();
-    }
-    );
         //Spawn write thread
         
         let write_handle = thread::spawn(move || {
@@ -184,21 +179,6 @@ fn main() -> Result<()> {
         drop(datasender);
         //Dropping the datasender should hangup
 
-    match heartbeatsender.try_send(true) {
-        Ok(()) => {
-            println!("Shutting down heartbeat thread");
-            heartbeat_handle.join()
-                .expect("Heartbeat thread is already dead");
-        }
-        Err(TrySendError::Full(_)) => {
-            println!("Shutting down heartbeat thread");
-            heartbeat_handle.join()
-                .expect("Heartbeat thread is already dead");
-        }
-        Err(TrySendError::Disconnected(_)) => {
-            //Heartbeat thread is already dead, no need to do anything
-        }
-    }
     write_handle.join().expect("Write thread is already dead");
     //Join write thread to wait for shutdown
     println!("SHUTDOWN: {}", main_loop_counter);
