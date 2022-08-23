@@ -101,17 +101,19 @@ fn main() -> Result<()> {
         .read(true)
         .open(DMA_NAME)
         .with_context(|| format!("Failed to open {}", DMA_NAME))?;
+    let mut dma_fd = FileDescriptor::dup(&bar_file)?;
+
 
     let mut bar_file = File::open(BAR1_NAME)
         .with_context(|| format!("Failed to open {}", BAR1_NAME))?;
-    /*let mut bar_fd = FileDescriptor::dup(&bar_file)?;
+    let mut bar_fd = FileDescriptor::dup(&bar_file)?;
     let mut poll_array = [
         pollfd {
-            fd: bar_fd.into_raw_file_descriptor(),
+            fd: dma_fd.into_raw_file_descriptor(),
             events: POLLIN,
             revents: 0
         }
-    ];*/
+    ];
 
 
 
@@ -126,7 +128,7 @@ fn main() -> Result<()> {
         //Main loop
         while !DONE.load(Ordering::Relaxed)  {
             //Wait for file ready
-            //poll(&mut poll_array, Some(Duration::from_millis(1))).context("Failed on polling BAR")?;
+            poll(&mut poll_array, Some(Duration::from_millis(1))).context("Failed on polling BAR")?;
             let shot_start = time::Instant::now();
             let shot_timestamp = Utc::now();
 
