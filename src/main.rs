@@ -101,7 +101,7 @@ fn main() -> Result<()> {
         .read(true)
         .open(DMA_NAME)
         .with_context(|| format!("Failed to open {}", DMA_NAME))?;
-    let mut dma_fd = FileDescriptor::dup(&bar_file)?;
+    let mut dma_fd = FileDescriptor::dup(&dma_file)?;
 
 
     let mut bar_file = File::open(BAR1_NAME)
