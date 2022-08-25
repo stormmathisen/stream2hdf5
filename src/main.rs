@@ -141,6 +141,8 @@ fn main() -> Result<()> {
                 cav_probe_pha: read_dma(&mut dma_file, ADC_OFFSET + 9 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[9]))?
             };
 
+            println!("{:?}", wave_data);
+
            let data_container = DataContainer {
                 internal_count: main_loop_counter,
                 secs: shot_timestamp.timestamp(),
