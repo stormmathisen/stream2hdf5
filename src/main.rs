@@ -37,8 +37,8 @@ const TMP_LOC: &str = "/home/sinap/Desktop/stream2hdf5/TMP/"; //Location to stor
 //Data definitions
 const SAMPLES: usize = 512; //Number of samples in each array
 static DONE: AtomicBool = AtomicBool::new(false);
-const ADC_OFFSET: u64 = 0; //Offset to first ADC array
-const ADC_LENGTH: u64 = 0; //Offset between ADC arrays
+const ADC_OFFSET: u64 = 160; //Offset to first ADC array
+const ADC_LENGTH: u64 = 128; //Offset between ADC arrays
 const ADC_NUM: u64= 10; //Number of ADCs
 const ACTIVE_PULSE_OFFSET: u64 = 70; //Offset for active pulse registry
 const TOTAL_PULSE_OFFSET: u64 = 71; //Offset for total pulse registry
