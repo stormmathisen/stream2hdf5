@@ -30,7 +30,7 @@ const PRINT_INTERVAL: u64 = 50000;
 
 //File definitions
 const BAR1_NAME: &str = "/dev/pcie_bar1_s3";
-const DMA_NAME: &str = "/dev/pcie_dma_s3";
+const DMA_NAME: &str = "/home/sinap/Desktop/dma_reg";
 const NAS_LOC: &str = "/home/sinap/Desktop/stream2hdf5/NAS/"; //Location to move hdf5 files at midnight
 const TMP_LOC: &str = "/home/sinap/Desktop/stream2hdf5/TMP/"; //Location to store locally
 
@@ -99,23 +99,16 @@ fn main() -> Result<()> {
     let mut dma_file = File::open(DMA_NAME)
         .with_context(|| format!("Failed to open {}", DMA_NAME))?;
 
-    let mut dma_file = OpenOptions::new()
-        .read(true)
-        .open(DMA_NAME)
-        .with_context(|| format!("Failed to open {}", DMA_NAME))?;
-    let mut dma_fd = FileDescriptor::dup(&dma_file)?;
-
-
     let mut bar_file = File::open(BAR1_NAME)
         .with_context(|| format!("Failed to open {}", BAR1_NAME))?;
     let mut bar_fd = FileDescriptor::dup(&bar_file)?;
-    let mut poll_array = [
+    /*let mut poll_array = [
         pollfd {
             fd: dma_fd.into_raw_file_descriptor(),
             events: POLLIN,
             revents: 0
         }
-    ];
+    ];*/
 
 
 
@@ -130,27 +123,22 @@ fn main() -> Result<()> {
         //Main loop
         while !DONE.load(Ordering::Relaxed)  {
             //Wait for file ready
-            poll(&mut poll_array, Some(Duration::from_millis(1))).context("Failed on polling BAR")?;
+            //poll(&mut poll_array, Some(Duration::from_millis(1))).context("Failed on polling BAR")?;
             let shot_start = time::Instant::now();
             let shot_timestamp = Utc::now();
 
-            let mut packet = [0u8; 4096];
-            dma_file.read(&mut packet)
-                .context("Failed to read packet from DMA")?;
-            let mut dma_reader = Cursor::new(packet);
-
             //Read data
             let wave_data = WaveData{
-                kly_fwd_pwr: read_dma(&mut dma_reader, ADC_OFFSET + 0 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[0]))?,
-                kly_fwd_pha: read_dma(&mut dma_reader, ADC_OFFSET + 1 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[1]))?,
-                kly_rev_pwr: read_dma(&mut dma_reader, ADC_OFFSET + 2 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[2]))?,
-                kly_rev_pha: read_dma(&mut dma_reader, ADC_OFFSET + 3 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[3]))?,
-                cav_fwd_pwr: read_dma(&mut dma_reader, ADC_OFFSET + 4 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[4]))?,
-                cav_fwd_pha: read_dma(&mut dma_reader, ADC_OFFSET + 5 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[5]))?,
-                cav_rev_pwr: read_dma(&mut dma_reader, ADC_OFFSET + 6 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[6]))?,
-                cav_rev_pha: read_dma(&mut dma_reader, ADC_OFFSET + 7 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[7]))?,
-                cav_probe_pwr: read_dma(&mut dma_reader, ADC_OFFSET + 8 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[8]))?,
-                cav_probe_pha: read_dma(&mut dma_reader, ADC_OFFSET + 9 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[9]))?
+                kly_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 0 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[0]))?,
+                kly_fwd_pha: read_dma(&mut dma_file, ADC_OFFSET + 1 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[1]))?,
+                kly_rev_pwr: read_dma(&mut dma_file, ADC_OFFSET + 2 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[2]))?,
+                kly_rev_pha: read_dma(&mut dma_file, ADC_OFFSET + 3 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[3]))?,
+                cav_fwd_pwr: read_dma(&mut dma_file, ADC_OFFSET + 4 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[4]))?,
+                cav_fwd_pha: read_dma(&mut dma_file, ADC_OFFSET + 5 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[5]))?,
+                cav_rev_pwr: read_dma(&mut dma_file, ADC_OFFSET + 6 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[6]))?,
+                cav_rev_pha: read_dma(&mut dma_file, ADC_OFFSET + 7 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[7]))?,
+                cav_probe_pwr: read_dma(&mut dma_file, ADC_OFFSET + 8 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[8]))?,
+                cav_probe_pha: read_dma(&mut dma_file, ADC_OFFSET + 9 * ADC_LENGTH).with_context(|| format!("Failed to read {}", DATA_FIELD_NAMES[9]))?
             };
 
            let data_container = DataContainer {
@@ -208,7 +196,7 @@ fn read_bar(buffer: &mut File, offset: u64) ->Result<u64> {
     Ok(output[0])
 }
 
-fn read_dma(buffer: &mut Cursor<[u8; 4096]>, offset: u64) -> Result<Vec<u16>> {
+fn read_dma(buffer: &mut File, offset: u64) -> Result<Vec<u16>> {
     let mut output: [u16; SAMPLES] = [0; SAMPLES];
 
     buffer.seek(SeekFrom::Start(offset))
