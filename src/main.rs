@@ -40,9 +40,9 @@ static DONE: AtomicBool = AtomicBool::new(false);
 const ADC_OFFSET: u64 = 160; //Offset to first ADC array
 const ADC_LENGTH: u64 = 128; //Offset between ADC arrays
 const ADC_NUM: u64= 10; //Number of ADCs
-const ACTIVE_PULSE_OFFSET: u64 = 70; //Offset for active pulse registry
-const TOTAL_PULSE_OFFSET: u64 = 71; //Offset for total pulse registry
-const STATE_OFFSET: u64 = 66; //Offset for stat
+const ACTIVE_PULSE_OFFSET: u64 = 70*2; //Offset for active pulse registry
+const TOTAL_PULSE_OFFSET: u64 = 71*2; //Offset for total pulse registry
+const STATE_OFFSET: u64 = 66*2; //Offset for stat
 const DATA_FIELD_NAMES: [&str; ADC_NUM as usize] = [
     "kly_fwd_pwr",
     "kly_fwd_pha",
@@ -173,6 +173,10 @@ fn main() -> Result<()> {
             //Wait for next pulse (there must be a better way!)
             while read_bar(&mut bar_file, TOTAL_PULSE_OFFSET)
                 .context("Failed to read Total Pulse")? == total_pulse {
+                std::thread::sleep(std::time::Duration::from_micros(100));
+                if DONE.load(Ordering::Relaxed) {
+                    break;
+                }
                 std::hint::spin_loop();
             }
             if main_loop_counter % PRINT_INTERVAL == 0 {
