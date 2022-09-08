@@ -68,9 +68,9 @@ struct DataContainer {
     internal_count: u64,
     secs: i64,
     nanos: u32,
-    active_pulse: u64,
-    total_pulse: u64,
-    state: u32,
+    active_pulse: i32,
+    total_pulse: i32,
+    state: i32,
     waveforms: WaveData
 }
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -149,7 +149,7 @@ fn main() -> Result<()> {
                 nanos: shot_timestamp.timestamp_subsec_nanos(),
                 active_pulse: read_bar(&mut bar_file, ACTIVE_PULSE_OFFSET).context("Failed to read Active Pulse")?,
                 total_pulse: read_bar(&mut bar_file, TOTAL_PULSE_OFFSET).context("Failed to read Total Pulse")?,
-                state: read_bar(&mut bar_file, STATE_OFFSET).context("Failed to read State")? as u32,
+                state: read_bar(&mut bar_file, STATE_OFFSET).context("Failed to read State")?,
                 waveforms: wave_data
             };
 
@@ -196,10 +196,10 @@ fn main() -> Result<()> {
 }
 
 
-fn read_bar(buffer: &mut File, offset: u64) ->Result<u64> {
-    let mut output: [u64; 1] = [0; 1];
+fn read_bar(buffer: &mut File, offset: u64) ->Result<i32> {
+    let mut output: [i32; 1] = [0; 1];
     buffer.seek(SeekFrom::Start(offset)).with_context(|| format!("Error while seeking to {} in {:?}", offset, buffer))?;
-    buffer.read_u64_into::<LittleEndian>(&mut output).with_context(|| format!("Error while reading {:?} into {:?}", buffer, output))?;
+    buffer.read_i32_into::<LittleEndian>(&mut output).with_context(|| format!("Error while reading {:?} into {:?}", buffer, output))?;
     Ok(output[0])
 }
 
