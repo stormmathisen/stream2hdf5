@@ -154,6 +154,7 @@ fn main() -> Result<()> {
             };
 
             let total_pulse = data_container.total_pulse;
+            println!("{:?}", total_pulse);
 
             //Try sending data to channel
 
