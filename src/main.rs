@@ -29,7 +29,7 @@ const SWITCH_INTERVAL: Duration = Duration::from_secs(3600);
 const PRINT_INTERVAL: u64 = 50000;
 
 //File definitions
-const BAR1_NAME: &str = "/dev/pcie_bar1_s3";
+const BAR1_NAME: &str = "/home/sinap/Desktop/stream2hdf5/bar_reg";
 const DMA_NAME: &str = "/home/sinap/Desktop/stream2hdf5/dma_reg";
 const NAS_LOC: &str = "/home/sinap/Desktop/stream2hdf5/NAS/"; //Location to move hdf5 files at midnight
 const TMP_LOC: &str = "/home/sinap/Desktop/stream2hdf5/TMP/"; //Location to store locally
